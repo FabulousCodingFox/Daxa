@@ -84,7 +84,7 @@ void embraceTheDarkness() {
 }
 
 namespace daxa {
-    ImGuiRenderer::ImGuiRenderer(gpu::DeviceHandle device, gpu::CommandQueueHandle queue, PipelineCompilerHandle& compiler) 
+    ImGuiRenderer::ImGuiRenderer(DeviceHandle device, CommandQueueHandle queue, PipelineCompilerHandle& compiler) 
         : device{ device }
     {
         embraceTheDarkness();
@@ -125,7 +125,7 @@ namespace daxa {
             }
         )--";
 
-        daxa::gpu::GraphicsPipelineBuilder pipelineBuilder;
+        daxa::GraphicsPipelineBuilder pipelineBuilder;
         auto pipelineDescription = pipelineBuilder
             .addShaderStage({.source = vertexGLSL, .stage = VK_SHADER_STAGE_VERTEX_BIT})
             .addShaderStage({.source = fragmentGLSL, .stage = VK_SHADER_STAGE_FRAGMENT_BIT})
@@ -174,23 +174,20 @@ namespace daxa {
         });
 
         auto cmdList = queue->getCommandList({});
-        cmdList->insertImageBarrier({
-            .barrier = gpu::FULL_MEMORY_BARRIER,
+        cmdList.queueImageBarrier({
             .image = fontSheet,
             .layoutAfter = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         });
-        cmdList->copyHostToImage({
+        cmdList.singleCopyHostToImage({
             .src = pixels,
-            .dst = fontSheet,
-            .size = width * height * sizeof(u8) * 4,
+            .dst = fontSheet->getImageHandle(),
         });
-        cmdList->insertImageBarrier({
-            .barrier = gpu::FULL_MEMORY_BARRIER,
+        cmdList.queueImageBarrier({
             .image = fontSheet,
             .layoutBefore = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             .layoutAfter = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         });
-        cmdList->finalize();
+        cmdList.finalize();
         queue->submitBlocking({
             .commandLists = { cmdList }
         });
@@ -206,21 +203,23 @@ namespace daxa {
             perFrameData.push_back(PerFrameData{
                 .vertexBuffer = device->createBuffer({
                     .size = newMinSizeVertex,
-                    .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                    .memoryUsage = VMA_MEMORY_USAGE_CPU_TO_GPU,
+                    //.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                    //.memoryUsage = VMA_MEMORY_USAGE_CPU_TO_GPU,
+                    .memoryType = MemoryType::CPU_TO_GPU,
                     .debugName = "dear ImGui vertex buffer"
                 }),
                 .indexBuffer = device->createBuffer({
                     .size = newMinSizeIndices,
-                    .usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                    .memoryUsage = VMA_MEMORY_USAGE_CPU_TO_GPU,
+                    //.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                    //.memoryUsage = VMA_MEMORY_USAGE_CPU_TO_GPU,
+                    .memoryType = MemoryType::CPU_TO_GPU,
                     .debugName = "dear ImGui index buffer"
                 }),
             });
         }
     }
     
-    u64 ImGuiRenderer::getImGuiTextureId(gpu::ImageViewHandle img) {
+    u64 ImGuiRenderer::getImGuiTextureId(ImageViewHandle img) {
         if (!texHandlePtrToReferencedImageIndex.contains(img.get())) {
             referencedImages.push_back(img);
             texHandlePtrToReferencedImageIndex[img.get()] = referencedImages.size() - 1;
@@ -228,7 +227,7 @@ namespace daxa {
         return texHandlePtrToReferencedImageIndex[img.get()];
     }
 
-    void ImGuiRenderer::recordCommands(ImDrawData* draw_data, daxa::gpu::CommandListHandle& cmdList, gpu::ImageViewHandle& target) {
+    void ImGuiRenderer::recordCommands(ImDrawData* draw_data, daxa::CommandListHandle& cmdList, ImageViewHandle& target) {
 
         if (draw_data && draw_data->TotalIdxCount > 0) {
             //--        data upload        --//
@@ -242,57 +241,59 @@ namespace daxa {
             auto& vertexBuffer  = perFrameData.front().vertexBuffer;
             auto& indexBuffer   = perFrameData.front().indexBuffer;
 
-            if (draw_data->TotalVtxCount * sizeof(ImDrawVert) > vertexBuffer->getSize()) {
+            if (draw_data->TotalVtxCount * sizeof(ImDrawVert) > vertexBuffer.getSize()) {
                 auto newSize = draw_data->TotalVtxCount * sizeof(ImDrawVert) + 4096;
                 vertexBuffer = device->createBuffer({
                     .size = newSize,
-                    .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                    .memoryUsage = VMA_MEMORY_USAGE_CPU_TO_GPU,
+                    //.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                    //.memoryUsage = VMA_MEMORY_USAGE_CPU_TO_GPU,
+                    .memoryType = MemoryType::CPU_TO_GPU,
                     .debugName = "dear ImGui vertex buffer",
                 });
             }
 
-            if (draw_data->TotalIdxCount * sizeof(ImDrawIdx) > indexBuffer->getSize()) {
+            if (draw_data->TotalIdxCount * sizeof(ImDrawIdx) > indexBuffer.getSize()) {
                 auto newSize = draw_data->TotalIdxCount * sizeof(ImDrawIdx) + 4096;
                 indexBuffer = device->createBuffer({
                     .size = newSize,
-                    .usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                    .memoryUsage = VMA_MEMORY_USAGE_CPU_TO_GPU,
+                    //.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                    //.memoryUsage = VMA_MEMORY_USAGE_CPU_TO_GPU,
+                    .memoryType = MemoryType::CPU_TO_GPU,
                     .debugName = "dear ImGui index buffer",
                 });
             }
             {
-                auto vtx_dst = vertexBuffer.mapMemory<ImDrawVert>();
-                auto idx_dst = indexBuffer.mapMemory<ImDrawIdx>();
+                auto vtx_dst = vertexBuffer.mapMemory();
+                auto idx_dst = indexBuffer.mapMemory();
 
                 for (int n = 0; n < draw_data->CmdListsCount; n++)
                 {
-                    const ImDrawList* cmd_list = draw_data->CmdLists[n];
-                    std::memcpy(vtx_dst.hostPtr, cmd_list->VtxBuffer.Data, cmd_list->VtxBuffer.Size * sizeof(ImDrawVert));
-                    std::memcpy(idx_dst.hostPtr, cmd_list->IdxBuffer.Data, cmd_list->IdxBuffer.Size * sizeof(ImDrawIdx));
-                    vtx_dst.hostPtr += cmd_list->VtxBuffer.Size;
-                    idx_dst.hostPtr += cmd_list->IdxBuffer.Size;
+                    const ImDrawList* draws = draw_data->CmdLists[n];
+                    std::memcpy(vtx_dst.hostPtr, draws->VtxBuffer.Data, draws->VtxBuffer.Size * sizeof(ImDrawVert));
+                    std::memcpy(idx_dst.hostPtr, draws->IdxBuffer.Data, draws->IdxBuffer.Size * sizeof(ImDrawIdx));
+                    vtx_dst.hostPtr += draws->VtxBuffer.Size * sizeof(ImDrawVert);
+                    idx_dst.hostPtr += draws->IdxBuffer.Size * sizeof(ImDrawIdx);
                 }
             }
             //--  render command recording --//
 
             auto colorAttachments = std::array{
-                gpu::RenderAttachmentInfo{
+                RenderAttachmentInfo{
                     .image = target,
                     .layout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL_KHR,
                     .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
                     .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
                 }
             };
-            cmdList->beginRendering({
+            cmdList.beginRendering({
                 .colorAttachments = colorAttachments,
             });
 
-            cmdList->bindPipeline(pipeline);
+            cmdList.bindPipeline(pipeline);
 
-            cmdList->bindVertexBuffer(0, vertexBuffer);
+            cmdList.bindVertexBuffer(0, vertexBuffer);
 
-            cmdList->bindIndexBuffer(indexBuffer, 0, VkIndexType::VK_INDEX_TYPE_UINT16);
+            cmdList.bindIndexBuffer(indexBuffer, 0, VkIndexType::VK_INDEX_TYPE_UINT16);
 
             {
                 float scale[2];
@@ -301,8 +302,8 @@ namespace daxa {
                 float translate[2];
                 translate[0] = -1.0f - draw_data->DisplayPos.x * scale[0];
                 translate[1] = -1.0f - draw_data->DisplayPos.y * scale[1];
-                cmdList->pushConstant(VK_SHADER_STAGE_VERTEX_BIT, scale);
-                cmdList->pushConstant(VK_SHADER_STAGE_VERTEX_BIT, translate, sizeof(scale));
+                cmdList.pushConstant(VK_SHADER_STAGE_VERTEX_BIT, scale);
+                cmdList.pushConstant(VK_SHADER_STAGE_VERTEX_BIT, translate, sizeof(scale));
             }
 
             ImVec2 clip_off = draw_data->DisplayPos;         // (0,0) unless using multi-viewports
@@ -311,17 +312,17 @@ namespace daxa {
             int global_vtx_offset = 0;
             int global_idx_offset = 0;
             for (int n = 0; n < draw_data->CmdListsCount; n++) {
-                const ImDrawList* cmd_list = draw_data->CmdLists[n];
+                const ImDrawList* draws = draw_data->CmdLists[n];
                 size_t lastTexId = 0;
                 auto set = setAlloc->getSet();
                 set->bindImage(0, referencedImages[0], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-                cmdList->bindSet(0, set);
-                for (int cmd_i = 0; cmd_i < cmd_list->CmdBuffer.Size; cmd_i++)  {
-                    const ImDrawCmd* pcmd = &cmd_list->CmdBuffer[cmd_i];
+                cmdList.bindSet(0, set);
+                for (int cmd_i = 0; cmd_i < draws->CmdBuffer.Size; cmd_i++)  {
+                    const ImDrawCmd* pcmd = &draws->CmdBuffer[cmd_i];
 
                     set = setAlloc->getSet();
                     set->bindImage(0, referencedImages[(size_t)pcmd->TextureId], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-                    cmdList->bindSet(0, set);
+                    cmdList.bindSet(0, set);
 
                     // Project scissor/clipping rectangles into framebuffer space
                     ImVec2 clip_min((pcmd->ClipRect.x - clip_off.x) * clip_scale.x, (pcmd->ClipRect.y - clip_off.y) * clip_scale.y);
@@ -342,17 +343,17 @@ namespace daxa {
                     scissor.extent.width = (uint32_t)(clip_max.x - clip_min.x);
                     scissor.extent.height = (uint32_t)(clip_max.y - clip_min.y);
 
-                    cmdList->setScissor(scissor);
+                    cmdList.setScissor(scissor);
 
                     // Draw
-                    cmdList->drawIndexed(pcmd->ElemCount, 1, pcmd->IdxOffset + global_idx_offset, pcmd->VtxOffset + global_vtx_offset, 0);
+                    cmdList.drawIndexed(pcmd->ElemCount, 1, pcmd->IdxOffset + global_idx_offset, pcmd->VtxOffset + global_vtx_offset, 0);
                 }
-                global_idx_offset += cmd_list->IdxBuffer.Size;
-                global_vtx_offset += cmd_list->VtxBuffer.Size;
+                global_idx_offset += draws->IdxBuffer.Size;
+                global_vtx_offset += draws->VtxBuffer.Size;
             }
 
-            cmdList->endRendering();
-            cmdList->unbindPipeline();
+            cmdList.endRendering();
+            cmdList.unbindPipeline();
             referencedImages.resize(1);
             texHandlePtrToReferencedImageIndex.clear();
         }

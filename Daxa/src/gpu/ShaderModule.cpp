@@ -5,15 +5,13 @@
 #include <streambuf>
 #include <thread>
 
+#include "backend/DeviceBackend.hpp"
+
 namespace daxa {
-	namespace gpu {
-
-		ShaderModule::~ShaderModule() {
-			if (deviceBackend) {
-				vkDestroyShaderModule(deviceBackend->device.device, shaderModule, nullptr);
-				deviceBackend = {};
-			}
+	ShaderModule::~ShaderModule() {
+		if (deviceBackend) {
+			vkDestroyShaderModule(deviceBackend->device.device, shaderModule, nullptr);
+			deviceBackend = {};
 		}
-
 	}
 }

@@ -18,7 +18,7 @@ namespace daxa {
         u8* preload = nullptr;
         size_t preloadSize = 0;
 
-        std::optional<gpu::SamplerCreateInfo> samplerInfo = std::nullopt;
+        std::optional<SamplerCreateInfo> samplerInfo = std::nullopt;
         
         bool operator == (ImageCacheFetchInfo const& other) const {
             return 
@@ -31,10 +31,10 @@ namespace daxa {
     };
 
     struct GPUSamplerCreateInfoHasher {
-        std::size_t operator()(gpu::SamplerCreateInfo const& info) const {
+        std::size_t operator()(SamplerCreateInfo const& info) const {
             size_t hash = 0x43fb87da;
-            u32 const* data = (u32 const*)(&info);
-            for (int i = 0; i < sizeof(gpu::SamplerCreateInfo) / 4; i++) {
+            u32 const* data = reinterpret_cast<u32 const*>(&info);
+            for (size_t i = 0; i < sizeof(SamplerCreateInfo) / 4; i++) {
                 hash ^= data[i];
                 hash <<= 1;
             }
@@ -46,10 +46,10 @@ namespace daxa {
         std::size_t operator()(ImageCacheFetchInfo const& info) const {
             size_t hash = std::filesystem::hash_value(info.path);
             hash <<= 3;
-            hash ^= (size_t)info.preload;
+            hash ^= reinterpret_cast<size_t>(info.preload);
             hash ^= info.preloadSize;
             hash <<= 3;
-            hash ^= (size_t)info.viewFormat;
+            hash ^= static_cast<size_t>(info.viewFormat);
             hash <<= 1;
             if (info.samplerInfo.has_value()) {
                 hash ^= GPUSamplerCreateInfoHasher{}(info.samplerInfo.value());
@@ -61,11 +61,11 @@ namespace daxa {
 
     class ImageCache {
     public:
-        ImageCache(gpu::DeviceHandle device) 
+        ImageCache(DeviceHandle device) 
             : device{ std::move(device) }
         { }
 
-        gpu::ImageViewHandle get(ImageCacheFetchInfo const& info, gpu::CommandListHandle& cmdList) {
+        ImageViewHandle get(ImageCacheFetchInfo const& info, CommandListHandle& cmdList) {
             if (!cache.contains(info)) {
                 printf("image cache miss\n");
                 cache[info] = loadImage(info, cmdList);
@@ -75,29 +75,29 @@ namespace daxa {
             return cache[info];
         }
 
-        std::unordered_map<ImageCacheFetchInfo, gpu::ImageViewHandle, ImageCacheFetchInfoHasher> cache = {};
+        std::unordered_map<ImageCacheFetchInfo, ImageViewHandle, ImageCacheFetchInfoHasher> cache = {};
     private:
-        gpu::ImageViewHandle loadImage(ImageCacheFetchInfo const& info, gpu::CommandListHandle& cmdList) {
+        ImageViewHandle loadImage(ImageCacheFetchInfo const& info, CommandListHandle& cmdList) {
             //stbi_set_flip_vertically_on_load(1);
             int width, height, channels;
             u8* data;
             if (info.preload) {
                 printf("try load from mem\n");
-                data = stbi_load_from_memory(info.preload, info.preloadSize, &width, &height, &channels, 4);
+                data = stbi_load_from_memory(info.preload, static_cast<int>(info.preloadSize), &width, &height, &channels, 4);
             } else {
-                data = stbi_load((char const*)info.path.string().c_str(), &width, &height, &channels, 4);
+                data = stbi_load(info.path.string().c_str(), &width, &height, &channels, 4);
             }
-            printf("loaded image from path: %s\n", (char const*)info.path.string().c_str());
+            printf("loaded image from path: %s\n", info.path.string().c_str());
             
-            u32 mipmaplevels = std::log2(std::max(width, height));
+            u32 mipmaplevels = static_cast<u32>(std::log2(std::max(width, height)));
 
             if (!data) {
                 return {};
             } else {
-                auto ci = gpu::ImageViewCreateInfo{
+                auto ci = ImageViewCreateInfo{
                     .image = device->createImage({
                         .format = info.viewFormat,
-                        .extent = { (u32)width, (u32)height, 1 },
+                        .extent = { static_cast<u32>(width), static_cast<u32>(height), 1 },
                         .mipLevels = mipmaplevels,
                         .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
                     }),
@@ -109,7 +109,7 @@ namespace daxa {
                     sampler_v.anisotropyEnable = VK_TRUE;
                     sampler_v.maxAnisotropy = 16.0f;
                     sampler_v.mipmapMode = VkSamplerMipmapMode::VK_SAMPLER_MIPMAP_MODE_LINEAR;
-                    sampler_v.maxLod = mipmaplevels - 1.0f;
+                    sampler_v.maxLod = static_cast<float>(mipmaplevels) - 1.0f;
                     if (!samplers.contains(sampler_v)) {
                         samplers[sampler_v] = device->createSampler(sampler_v);
                     }
@@ -122,49 +122,34 @@ namespace daxa {
                 }
                 auto image = device->createImageView(ci);
 
-                cmdList->insertImageBarrier({
+                cmdList.queueImageBarrier({
                     .image = image,
                     .layoutAfter = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                 });
-                cmdList->copyHostToImage({
+                cmdList.singleCopyHostToImage({
                     .src = data,
-                    .dst = image,
-                    .size = static_cast<u32>(width*height*4),
+                    .dst = image->getImageHandle(),
+                    //.size = static_cast<u32>(width*height*4),
                 });
-                if (false) {
-                    cmdList->insertImageBarrier({
-                        .barrier = {
-                            .srcStages = gpu::STAGE_TRANSFER,
-                            .srcAccess = gpu::ACCESS_MEMORY_READ,
-                            .dstStages = gpu::STAGE_ALL_COMMANDS,
-                            .dstAccess = gpu::ACCESS_MEMORY_WRITE,
-                        },
-                        .image = image,
-                        .layoutBefore = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                        .layoutAfter = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                    });
-                }
-                else {
-                    generateMipLevels(
-                        cmdList, 
-                        image, 
-                        VkImageSubresourceLayers{
-                            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                            .mipLevel = 0,
-                            .baseArrayLayer = 0,
-                            .layerCount = 1,
-                        },
-                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-                    );
-                }
+                generateMipLevels(
+                    cmdList, 
+                    image, 
+                    VkImageSubresourceLayers{
+                        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                        .mipLevel = 0,
+                        .baseArrayLayer = 0,
+                        .layerCount = 1,
+                    },
+                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                );
 
                 std::free(data);
                 return image;
             }
         }
 
-        gpu::DeviceHandle device = {};
+        DeviceHandle device = {};
 
-        std::unordered_map<gpu::SamplerCreateInfo, gpu::SamplerHandle, GPUSamplerCreateInfoHasher> samplers = {};
+        std::unordered_map<SamplerCreateInfo, SamplerHandle, GPUSamplerCreateInfoHasher> samplers = {};
     };
 }

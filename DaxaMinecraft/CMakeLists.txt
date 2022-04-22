@@ -1,9 +1,13 @@
 
-file(GLOB_RECURSE SOURCES "*.cpp" "*.c")
-add_executable(DaxaMinecraft ${SOURCES})
+add_executable(DaxaMinecraft
+    "src/main.cpp"
+)
 
 find_package(glm CONFIG REQUIRED)
-target_link_libraries(DaxaMinecraft PUBLIC Daxa glm::glm)
+find_package(fmt CONFIG REQUIRED)
+target_link_libraries(DaxaMinecraft PUBLIC Daxa glm::glm fmt::fmt)
 target_include_directories(DaxaMinecraft PUBLIC "src")
 
-# set_project_warnings(DaxaMinecraft)
+# target_link_options(DaxaMinecraft PRIVATE -Wl,/SUBSYSTEM:Windows,/ENTRY:mainCRTStartup)
+
+set_project_warnings(DaxaMinecraft)

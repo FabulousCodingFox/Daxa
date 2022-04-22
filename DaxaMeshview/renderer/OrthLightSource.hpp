@@ -10,7 +10,7 @@ public:
 	};
 
 	void recreateShadowMap(RenderContext& renderCTX, u32 width, u32 height) {
-		using namespace daxa::gpu;
+		using namespace daxa;
 
 		shadowMap = renderCTX.device->createImageView({
 			.image = renderCTX.device->createImage({
@@ -32,7 +32,7 @@ public:
 	}
 
 	void init(RenderContext& renderCTX) {
-		using namespace daxa::gpu;
+		using namespace daxa;
 		recreateShadowMap(renderCTX, 4096, 4096);
 
 		auto pipeBuilder = GraphicsPipelineBuilder{};
@@ -46,47 +46,42 @@ public:
 
 		infoBuffer = renderCTX.device->createBuffer({
 			.size = sizeof(GPUInfo),
-			.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+			//.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
 			.debugName = "orth shadow pass info buffer",
 		});
 	}
 
 	void render(
-		RenderContext& renderCTX, 
-		daxa::gpu::CommandListHandle& cmd, 
+		RenderContext&, 
+		daxa::CommandListHandle& cmd, 
 		std::vector<DrawPrimCmd>& draws, 
-		daxa::gpu::BufferHandle& primitiveInfosBuffer,
-		glm::vec3 const& direction, 
-		f32 distance, 
-		glm::vec4 color
+		daxa::BufferHandle& primitiveInfosBuffer,
+		glm::vec3 const&, 
+		f32, 
+		glm::vec4
 	) {
-		using namespace daxa::gpu;
+		using namespace daxa;
 
 		glm::mat4 vp{ 1.0f };
-		cmd->copyHostToBuffer({
-			.src = &vp,
+		cmd.singleCopyHostToBuffer({
+			.src = reinterpret_cast<u8*>(&vp),
 			.dst = infoBuffer,
-			.size = sizeof(GPUInfo),
+			.region = {.size = sizeof(GPUInfo) },
 		});
-		auto memBarrs = std::array{
-			MemoryBarrier {
-				.srcStages = VK_PIPELINE_STAGE_2_TRANSFER_BIT_KHR,
-				.srcAccess = VK_ACCESS_2_TRANSFER_WRITE_BIT_KHR,
+		cmd.queueMemoryBarrier({
+			.srcStages = VK_PIPELINE_STAGE_2_TRANSFER_BIT_KHR,
+			.srcAccess = VK_ACCESS_2_TRANSFER_WRITE_BIT_KHR,
+			.dstStages = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT_KHR,
+			.dstAccess = VK_ACCESS_2_SHADER_STORAGE_READ_BIT_KHR,
+		});
+		cmd.queueImageBarrier({
+			.barrier = {
 				.dstStages = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT_KHR,
-				.dstAccess = VK_ACCESS_2_SHADER_STORAGE_READ_BIT_KHR,
+				.dstAccess = VK_ACCESS_2_SHADER_READ_BIT_KHR,
 			},
-		};
-		auto imgBarrs = std::array{
-			ImageBarrier{
-				.barrier = {
-					.dstStages = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT_KHR,
-					.dstAccess = VK_ACCESS_2_SHADER_READ_BIT_KHR,
-				},
-				.image = shadowMap,
-				.layoutAfter = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-			}
-		};
-		cmd->insertBarriers( memBarrs, imgBarrs);
+			.image = shadowMap,
+			.layoutAfter = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+		});
 
 		RenderAttachmentInfo depthAttach{
 			.image = shadowMap,
@@ -95,13 +90,13 @@ public:
 			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
 			.clearValue = VkClearValue{.depthStencil = {.depth = 1.0f}},
 		};
-		cmd->beginRendering({ .depthAttachment = &depthAttach, });
-		cmd->bindPipeline(pipeline);
+		cmd.beginRendering({ .depthAttachment = &depthAttach, });
+		cmd.bindPipeline(pipeline);
 		auto persistentSet = persistentSetAlloc->getSet("orth light persistent set");
 		persistentSet->bindBuffer(0, infoBuffer);
 		persistentSet->bindBuffer(1, primitiveInfosBuffer);
-		cmd->bindSet(0, persistentSet);
-		cmd->bindAll(1);
+		cmd.bindSet(0, persistentSet);
+		cmd.bindAll(1);
 
 		for (u32 i = 0; i < draws.size(); i++) {
 			auto& draw = draws[i];
@@ -110,18 +105,18 @@ public:
 				u32 vertexBufferId;
 				u32 drawId;
 			} push {
-				draw.prim->vertexPositions->getStorageBufferDescriptorIndex().value(),
+				draw.prim->vertexPositions.getDescriptorIndex(),
 				i
 			};
-			cmd->pushConstant(VK_SHADER_STAGE_VERTEX_BIT, push);
-			cmd->bindIndexBuffer(draw.prim->indiexBuffer);
-			cmd->drawIndexed(draw.prim->indexCount, 1, 0, 0, 0);
+			cmd.pushConstant(VK_SHADER_STAGE_VERTEX_BIT, push);
+			cmd.bindIndexBuffer(draw.prim->indiexBuffer);
+			cmd.drawIndexed(draw.prim->indexCount, 1, 0, 0, 0);
 		}
 
-		cmd->unbindPipeline();
-		cmd->endRendering();
+		cmd.unbindPipeline();
+		cmd.endRendering();
 
-		cmd->insertImageBarrier({
+		cmd.queueImageBarrier({
 			.barrier = {
 				.srcStages = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT_KHR,
 				.srcAccess = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT_KHR,
@@ -133,9 +128,9 @@ public:
 			.layoutAfter = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 		});
 	}
-	daxa::gpu::ImageViewHandle shadowMap = {};
+	daxa::ImageViewHandle shadowMap = {};
 private:
-	daxa::gpu::PipelineHandle pipeline = {};
-	daxa::gpu::BindingSetAllocatorHandle persistentSetAlloc = {};
-	daxa::gpu::BufferHandle infoBuffer = {};
+	daxa::PipelineHandle pipeline = {};
+	daxa::BindingSetAllocatorHandle persistentSetAlloc = {};
+	daxa::BufferHandle infoBuffer = {};
 };

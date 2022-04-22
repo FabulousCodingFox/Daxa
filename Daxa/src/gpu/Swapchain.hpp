@@ -14,59 +14,71 @@
 #include "Image.hpp"
 #include "SwapchainImage.hpp"
 #include "Signal.hpp"
-#include "DeviceBackend.hpp"
 
 namespace daxa {
-	namespace gpu {
+	struct SwapchainCreateInfo{
+		VkSurfaceKHR surface 				= VK_NULL_HANDLE;
+		u32 width 							= 256;
+		u32 height			 				= 256;
+		VkPresentModeKHR presentMode 		= VK_PRESENT_MODE_FIFO_KHR;
+		VkImageUsageFlags additionalUses 	= {};
+		char const* debugName 				= {};
+	};
 
-		VkSurfaceKHR createSurface(void* sdlWindowHandle, VkInstance instance);
+	class Swapchain {
+	public:
+		Swapchain() 								= default;
+		Swapchain(Swapchain&&) noexcept;
+		Swapchain& operator=(Swapchain&&) noexcept;
+		Swapchain(Swapchain const&) 				= delete;
+		Swapchain& operator=(Swapchain const&) 		= delete;
+		~Swapchain();
 
-		struct SwapchainCreateInfo{
-			VkSurfaceKHR surface 				= VK_NULL_HANDLE;
-			u32 width 							= 256;
-			u32 height			 				= 256;
-			VkPresentModeKHR presentMode 		= VK_PRESENT_MODE_FIFO_KHR;
-			VkImageUsageFlags additionalUses 	= {};
-			char const* debugName 				= {};
-		};
+		void resize(VkExtent2D newSize);
 
-		class Swapchain {
-		public:
-			Swapchain() 								= default;
-			Swapchain(Swapchain&&) noexcept;
-			Swapchain& operator=(Swapchain&&) noexcept;
-			Swapchain(Swapchain const&) 				= delete;
-			Swapchain& operator=(Swapchain const&) 		= delete;
-			~Swapchain();
+		void setPresentMode(VkPresentModeKHR newPresentMode);
 
-			void resize(VkExtent2D newSize);
+		SwapchainImage aquireNextImage();
 
-			void setPresentMode(VkPresentModeKHR newPresentMode);
+		VkExtent2D getSize() const { return size; }
 
-			SwapchainImage aquireNextImage();
+		VkFormat getVkFormat() const { return swapchainImageFormat; }
 
-			VkExtent2D getSize() const { return size; }
+		std::string const& getDebugName() const { return debugName; }
+	private:
+		friend class Device;
 
-			VkFormat getVkFormat() const { return swapchainImageFormat; }
+		void construct(std::shared_ptr<DeviceBackend> deviceBackend, SwapchainCreateInfo ci);
 
-			std::string const& getDebugName() const { return debugName; }
-		private:
-			friend class Device;
+		std::shared_ptr<DeviceBackend> 	deviceBackend 			= {};
+		VkFence 						aquireFence 			= VK_NULL_HANDLE;
+		VkPresentModeKHR 				presentMode 			= VK_PRESENT_MODE_FIFO_KHR;
+		VkSurfaceKHR 					surface 				= VK_NULL_HANDLE;
+		VkSwapchainKHR 					swapchain 				= VK_NULL_HANDLE;
+		VkFormat 						swapchainImageFormat 	= {};
+		std::vector<ImageViewHandle> 	swapchainImageViews		= {};
+		VkExtent2D 						size 					= {}; 
+		VkImageUsageFlags 				additionalimageUses		= {};
+		std::string 					debugName 				= {};
+	}; 
+	class SwapchainHandle : public SharedHandle<Swapchain>{};
 
-			void construct(std::shared_ptr<DeviceBackend> deviceBackend, SwapchainCreateInfo ci);
+	class Swapchain2 {
+	public:
+		Swapchain2() = default;
 
-			std::shared_ptr<DeviceBackend> 	deviceBackend 			= {};
-			VkFence 						aquireFence 			= VK_NULL_HANDLE;
-			VkPresentModeKHR 				presentMode 			= VK_PRESENT_MODE_FIFO_KHR;
-			VkSurfaceKHR 					surface 				= VK_NULL_HANDLE;
-			VkSwapchainKHR 					swapchain 				= VK_NULL_HANDLE; 
-			VkFormat 						swapchainImageFormat 	= {};
-			std::vector<ImageViewHandle> 	swapchainImageViews			= {};
-			VkExtent2D 						size 					= {}; 
-			VkImageUsageFlags 				additionalimageUses		= {};
-			std::string 					debugName 				= {};
-		};
+		static Result<Swapchain2> construct(std::shared_ptr<DeviceBackend>& deviceBackend, SwapchainCreateInfo const& ci, Swapchain2* old = {});
 
-		class SwapchainHandle : public SharedHandle<Swapchain>{};
-	}
+		Result<std::pair<u32, ImageViewHandle>> aquireNextImage();
+
+		std::string const& getDebugName() const { return debugName; }
+	private:
+		std::shared_ptr<DeviceBackend> 	deviceBackend 	= {};
+		SwapchainCreateInfo 			ci 				= {};
+		VkFence 						aquireFence 	= VK_NULL_HANDLE;
+		VkSwapchainKHR 					swapchain 		= VK_NULL_HANDLE;
+		VkFormat 						format 			= {};
+		std::vector<ImageViewHandle>	imageViews 		= {};
+		std::string 					debugName 		= {};
+	};
 }

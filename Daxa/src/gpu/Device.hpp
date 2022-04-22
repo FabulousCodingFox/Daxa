@@ -8,10 +8,8 @@
 
 #include <vulkan/vulkan.h>
 
-#include <vk_mem_alloc.h>
 #include <VkBootstrap.h>
 
-#include "DeviceBackend.hpp"
 #include "Handle.hpp"
 #include "Graveyard.hpp"
 #include "CommandList.hpp"
@@ -28,71 +26,67 @@
 #include "PipelineCompiler.hpp"
 
 namespace daxa {
-	namespace gpu {
+	class Instance;
+	class DeviceHandle;
 
-		class Instance;
+	class Device {
+	public:
+		Device(Instance& instance);
+		Device(Device const& other)				= delete;
+		Device& operator=(Device const&)		= delete;
+		Device(Device&&) noexcept				= delete;
+		Device& operator=(Device&&) noexcept	= delete;
 
-		class DeviceHandle;
+		CommandQueueHandle createCommandQueue(CommandQueueCreateInfo const& ci);
 
-		class Device {
-		public:
-			Device(Instance& instance);
-			Device(Device const& other)				= delete;
-			Device& operator=(Device const&)		= delete;
-			Device(Device&&) noexcept				= delete;
-			Device& operator=(Device&&) noexcept	= delete;
+		static DeviceHandle create();
 
-			CommandQueueHandle createCommandQueue(CommandQueueCreateInfo const& ci);
+		SamplerHandle createSampler(SamplerCreateInfo ci);
 
-			static DeviceHandle create();
+		ImageHandle createImage(ImageCreateInfo const& ci);
 
-			SamplerHandle createSampler(SamplerCreateInfo ci);
+		ImageViewHandle createImageView(ImageViewCreateInfo const& ci);
 
-			ImageHandle createImage(ImageCreateInfo const& ci);
+		/**
+		 * \param ci all information defining the buffer
+		 * \return a reference counted buffer handle of the created buffer ressource.
+		 */
+		BufferHandle createBuffer(BufferCreateInfo ci);
 
-			ImageViewHandle createImageView(ImageViewCreateInfo const& ci);
+		TimelineSemaphoreHandle createTimelineSemaphore(TimelineSemaphoreCreateInfo const& ci);
 
-			/**
-			 * \param ci all information defining the buffer
-			 * \return a reference counted buffer handle of the created buffer ressource.
-			 */
-			BufferHandle createBuffer(BufferCreateInfo ci);
+		SignalHandle createSignal(SignalCreateInfo const& ci);
 
-			TimelineSemaphoreHandle createTimelineSemaphore(TimelineSemaphoreCreateInfo const& ci);
+		SwapchainHandle createSwapchain(SwapchainCreateInfo swapchainCI);
 
-			SignalHandle createSignal(SignalCreateInfo const& ci);
+		BindingSetLayout const& getBindingSetLayout(BindingSetDescription const& description);
+		
+		std::shared_ptr<BindingSetLayout const> getBindingSetLayoutShared(BindingSetDescription const& description);
 
-			SwapchainHandle createSwapchain(SwapchainCreateInfo swapchainCI);
+		BindingSetAllocatorHandle createBindingSetAllocator(BindingSetAllocatorCreateInfo const& ci);
 
-			BindingSetLayout const& getBindingSetLayout(BindingSetDescription const& description);
-			
-			std::shared_ptr<BindingSetLayout const> getBindingSetLayoutShared(BindingSetDescription const& description);
+		PipelineCompilerHandle createPipelineCompiler();
 
-			BindingSetAllocatorHandle createBindingSetAllocator(BindingSetAllocatorCreateInfo const& ci);
+		/**
+		 * Waits for the device to complete all submitted operations and the gpu to idle.
+		 */
+		void waitIdle();
 
-			PipelineCompilerHandle createPipelineCompiler();
+		VkPhysicalDevice getVkPhysicalDevice() const;
+		VkDevice getVkDevice() const;
+		u32 getVkGraphicsQueueFamilyIndex() const;
+	private:
+		friend class Instance;
 
-			/**
-			 * Waits for the device to complete all submitted operations and the gpu to idle.
-			 */
-			void waitIdle();
+		CommandListHandle getNextCommandList();
 
-			const VkPhysicalDevice getVkPhysicalDevice() const { return backend->device.physical_device; }
-			const VkDevice getVkDevice() const { return backend->device.device; }
-			const VmaAllocator getVma() const { return backend->allocator; }
-			const u32 getVkGraphicsQueueFamilyIndex() const { return backend->graphicsQFamilyIndex; }
-		private:
-			friend class Instance;
+		shaderc::Compiler 						shaderCompiler 				= {};
+		shaderc::CompileOptions 				shaderCompileOptions 		= {};
+		std::shared_ptr<DeviceBackend> 			backend 					= {};
+		std::shared_ptr<StagingBufferPool> 		uploadStagingBufferPool 	= {};
+		std::shared_ptr<StagingBufferPool> 		downloadStagingBufferPool 	= {};
+		std::shared_ptr<BindingSetLayoutCache>	bindingSetDescriptionCache 	= {};
+	};
 
-			CommandListHandle getNextCommandList();
-
-			shaderc::Compiler 						shaderCompiler 				= {};
-			shaderc::CompileOptions 				shaderCompileOptions 		= {};
-			std::shared_ptr<DeviceBackend> 			backend 					= {};
-			std::shared_ptr<StagingBufferPool> 		stagingBufferPool 			= {};
-			std::shared_ptr<BindingSetLayoutCache>	bindingSetDescriptionCache 	= {};
-		};
-
-		class DeviceHandle : public SharedHandle<Device>{};
-	}
+	class DeviceHandle : public SharedHandle<Device>{};
 }

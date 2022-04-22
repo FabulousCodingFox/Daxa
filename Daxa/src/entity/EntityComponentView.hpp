@@ -111,8 +111,8 @@ namespace daxa {
                 return *this;
             }
 
-            bool operator == (const EntityComponentIterator& b) { return denseIndex == b.denseIndex; };
-            bool operator != (const EntityComponentIterator& b) { return denseIndex != b.denseIndex; };  
+            bool operator == (const EntityComponentIterator& b) const { return denseIndex == b.denseIndex; };
+            bool operator != (const EntityComponentIterator& b) const { return denseIndex != b.denseIndex; };  
 
         private:
             EntityIndex denseIndex = {};
@@ -125,7 +125,7 @@ namespace daxa {
         }
 
         auto end() {
-            return EntityComponentIterator{ (EntityIndex)storage<FirstComponentType>().denseIndices.size(), versions, &storages };
+            return EntityComponentIterator{ static_cast<EntityIndex>(storage<FirstComponentType>().denseIndices.size()), versions, &storages };
         }
 
         template<typename SpecificType>

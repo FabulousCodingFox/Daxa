@@ -1,17 +1,75 @@
 #include "PipelineCompiler.hpp"
 
 #include <fstream>
+#include <thread>
+#include <locale>
+#include <regex>
+#include <sstream>
 
-#include <spirv_reflect.h>
+#include "spirv_reflect.h"
+#include "shaderc/shaderc.h"
+#define NOMINMAX
+#ifdef _WIN32
+	#include "Windows.h"
+	#include "wrl/client.h"
+	using namespace Microsoft::WRL;
+#else
+#endif
+#include "dxcapi.h"
 
 #include "Instance.hpp"
 #include "util.hpp"
+#include "backend/DeviceBackend.hpp"
 
 using Path = std::filesystem::path;
 
-using namespace daxa::gpu;
+static const std::regex PRAGMA_ONCE_REGEX = std::regex(R"reg(#\s*pragma\s*once\s*)reg");
+static const std::regex REPLACE_REGEX = std::regex(R"reg(\W)reg");
+
+static void shaderPreprocess(std::string& fileStr, std::filesystem::path const& path) {
+    std::smatch matches;
+    std::string line;
+    std::stringstream fileSS{fileStr};
+    std::stringstream resultSS;
+
+    bool has_pragma_once = false;
+    auto abspathStr = std::filesystem::absolute(path).string();
+
+    for (std::size_t line_num = 0; std::getline(fileSS, line); ++line_num) {
+        if (std::regex_match(line, matches, PRAGMA_ONCE_REGEX)) {
+            resultSS << "#if !defined(";
+            std::regex_replace(std::ostreambuf_iterator<char>(resultSS), abspathStr.begin(), abspathStr.end(), REPLACE_REGEX, "_");
+            resultSS << ")\n";
+            has_pragma_once = true;
+        } else {
+            resultSS << line << "\n";
+        }
+    }
+
+    if (has_pragma_once) {
+        resultSS << "\n#define ";
+        std::regex_replace(std::ostreambuf_iterator<char>(resultSS), abspathStr.begin(), abspathStr.end(), REPLACE_REGEX, "_");
+        resultSS << "\n#endif";
+    }
+
+    fileStr = resultSS.str();
+}
 
 namespace daxa {
+	#define BACKEND (*static_cast<Backend*>(this->backend.get()))
+
+	struct Backend{
+        shaderc::Compiler compiler = {};
+        shaderc::CompileOptions options = {};
+		ComPtr<IDxcUtils> dxcUtils = {};
+		ComPtr<IDxcCompiler3> dxcCompiler = {};
+		ComPtr<IDxcIncludeHandler> dxcIncludeHandler = {};
+	};
+
+	void backendDeletor(void* backend) {
+		delete static_cast<Backend*>(backend);
+	}
+
 	std::vector<VkDescriptorSetLayout> processReflectedDescriptorData(
 		std::vector<BindingSetDescription>& setDescriptions,
 		BindingSetLayoutCache& descCache,
@@ -27,8 +85,8 @@ namespace daxa {
 		return std::move(descLayouts);
 	}
 	
-	Result<std::string> PipelineCompiler::tryLoadShaderSourceFromFile(std::filesystem::path const& path) {
-		auto result = sharedData->findFullPathOfFile(path);
+	Result<std::string> PipelineCompilerShadedData::tryLoadShaderSourceFromFile(std::filesystem::path const& path) {
+		auto result = findFullPathOfFile(path);
 		if (result.isErr()) {
 			return ResultErr{ .message = result.message() };
 		}
@@ -42,7 +100,7 @@ namespace daxa {
 				err += '\"';
 				return ResultErr{ err.c_str() };
 			}
-			sharedData->observedHotLoadFiles->insert({result.value(), std::filesystem::last_write_time(result.value())});
+			observedHotLoadFiles->insert({result.value(), std::filesystem::last_write_time(result.value())});
 			std::string str;
 
 			ifs.seekg(0, std::ios::end);   
@@ -55,7 +113,9 @@ namespace daxa {
 				std::this_thread::sleep_for(std::chrono::milliseconds(1));
 				continue;
 			}
-					
+
+            shaderPreprocess(str, path);
+
 			return str;
 		}
 
@@ -65,7 +125,120 @@ namespace daxa {
 		return ResultErr{ err.c_str() };
 	}
 
-	Result<std::vector<u32>> PipelineCompiler::tryGenSPIRVFromShaderc(std::string const& src, VkShaderStageFlagBits shaderStage, gpu::ShaderLang lang, char const* sourceFileName) {
+	std::wstring u8_ascii_to_wstring(char const* str) {
+		std::wstring ret;
+		for (int i = 0; i < std::strlen(str)+1 && str != nullptr; i++) {
+			ret.push_back(str[i]);
+		}
+		return ret;
+	}
+
+	Result<std::vector<u32>> PipelineCompiler::tryGenSPIRVFromDxc(
+		std::string const& src, 
+		VkShaderStageFlagBits shaderStage, 
+		char const* entryPoint, 
+		char const* sourceFileName, 
+		std::vector<std::string> const& defines
+	) {
+		std::vector<LPCWSTR> args;
+
+		std::vector<std::wstring> wstringBuffer;
+		wstringBuffer.reserve(defines.size());
+		for (auto& define : defines) {
+			wstringBuffer.push_back(u8_ascii_to_wstring(define.c_str()));
+			args.push_back(L"-D");
+			args.push_back(wstringBuffer.back().c_str());
+		}
+
+		auto sourceFileNameWString = u8_ascii_to_wstring(sourceFileName);
+		args.push_back(sourceFileNameWString.c_str());
+
+		// Bugfix: 	Do not make a vector of strings and get the data ptr to them.
+		//			The data ptr will be invalidated on push_back when the path is short enough to be short string optimized.
+		for (auto& root : sharedData->rootPaths) {
+			args.push_back(L"-I");
+			args.push_back(root.c_str());
+		}
+
+		// set matrix packing to column major
+		args.push_back(L"-Zpc");
+
+		// set warnings as errors
+		args.push_back(DXC_ARG_WARNINGS_ARE_ERRORS); //-WX
+
+		// setting target
+		args.push_back(L"-spirv");
+		args.push_back(L"-fspv-target-env=vulkan1.1");
+
+		// set optimization setting
+		args.push_back(L"-O3");
+
+		// setting entry point
+		args.push_back(L"-E");
+		std::wstring entryAsWideString;
+		for (int i = 0; i < std::strlen(entryPoint)+1 && entryPoint != nullptr; i++) {
+			entryAsWideString.push_back(entryPoint[i]);
+		}
+		args.push_back(entryAsWideString.data());
+		
+		// set shader model
+		args.push_back(L"-T");
+		std::wstring profile;
+		switch (shaderStage) {
+			case VkShaderStageFlagBits::VK_SHADER_STAGE_VERTEX_BIT: profile = L"vs_6_0"; break;
+			case VkShaderStageFlagBits::VK_SHADER_STAGE_FRAGMENT_BIT: profile = L"ps_6_0"; break;
+			case VkShaderStageFlagBits::VK_SHADER_STAGE_COMPUTE_BIT: profile = L"cs_6_0"; break;
+			default: return daxa::ResultErr{ .message = "shader compilation error: the given shader stage is either missing or not supported by dxc" };
+		}
+		args.push_back(profile.data());
+
+		// set hlsl version to 2021
+		args.push_back(L"-HV");
+		args.push_back(L"2021");
+
+		DxcBuffer srcBuffer{
+			.Ptr = src.c_str(),
+			.Size = static_cast<u32>(src.size()),
+			.Encoding = static_cast<u32>(0),
+		};
+
+		ComPtr<IDxcResult> result;
+		BACKEND.dxcCompiler->Compile(&srcBuffer, args.data(), static_cast<u32>(args.size()), BACKEND.dxcIncludeHandler.Get(), IID_PPV_ARGS(&result));
+
+		ComPtr<IDxcBlobUtf8> errorMessage;
+		result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&errorMessage), nullptr);
+
+		if (errorMessage && errorMessage->GetStringLength() > 0) {
+			auto str = std::string();
+			str.resize(errorMessage->GetBufferSize());
+			for (size_t i = 0; i < str.size(); i++) {
+				str[i] = static_cast<char const*>(errorMessage->GetBufferPointer())[i];
+			}
+			str = std::string("DXC: ") + str;
+			//str = std::string(sourceFileName) + str;
+			
+			return daxa::ResultErr{.message = str };
+		}
+
+		ComPtr<IDxcBlob> shaderobj;
+		result->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&shaderobj), nullptr);
+
+		std::vector<u32> spv;
+		spv.resize(shaderobj->GetBufferSize()/4);
+		for (size_t i = 0; i < spv.size(); i++) {
+			spv[i] = static_cast<u32*>(shaderobj->GetBufferPointer())[i];
+		}
+
+		return {spv};
+	}
+
+	Result<std::vector<u32>> PipelineCompiler::tryGenSPIRVFromShaderc(
+		std::string const& src, 
+		VkShaderStageFlagBits shaderStage, 
+		ShaderLang lang, 
+		char const* sourceFileName,
+		std::vector<std::string> const& defines
+	) {
 		auto translateShaderStage = [](VkShaderStageFlagBits stage) -> shaderc_shader_kind {
 			switch (stage) {
 			case VkShaderStageFlagBits::VK_SHADER_STAGE_VERTEX_BIT: return shaderc_shader_kind::shaderc_vertex_shader;
@@ -93,9 +266,13 @@ namespace daxa {
 			case ShaderLang::GLSL: langType = shaderc_source_language_glsl; break;
 			case ShaderLang::HLSL: langType = shaderc_source_language_hlsl; break;
 		}
-		options.SetSourceLanguage(langType);
+		BACKEND.options.SetSourceLanguage(langType);
+		BACKEND.options.SetTargetEnvironment(shaderc_target_env_vulkan, VK_API_VERSION_1_2);
+		BACKEND.options.SetTargetSpirv(shaderc_spirv_version::shaderc_spirv_version_1_3);
+		// TODO: implement defines
+		//options.SetOptimizationLevel(shaderc_optimization_level_performance);
 		
-		shaderc::SpvCompilationResult module = compiler.CompileGlslToSpv(src, stage, sourceFileName, options);
+		shaderc::SpvCompilationResult module = BACKEND.compiler.CompileGlslToSpv(src, stage, sourceFileName, BACKEND.options);
 
 		if (module.GetCompilationStatus() != shaderc_compilation_status_success) {
 			return daxa::ResultErr{.message = std::move(module.GetErrorMessage())};
@@ -204,10 +381,10 @@ namespace daxa {
 	}
 
 	
-	Result<gpu::ShaderModuleHandle> PipelineCompiler::tryCreateShaderModule(gpu::ShaderModuleCreateInfo const& ci) {
+	Result<ShaderModuleHandle> PipelineCompiler::tryCreateShaderModule(ShaderModuleCreateInfo const& ci) {
 		std::string sourceCode = {};
 		if (!ci.pathToSource.empty()) {
-			auto src = tryLoadShaderSourceFromFile(ci.pathToSource);
+			auto src = sharedData->tryLoadShaderSourceFromFile(ci.pathToSource);
 			if (src.isErr()) {
 				return ResultErr{ src.message() };
 			}
@@ -220,7 +397,13 @@ namespace daxa {
 			return ResultErr{"no path given"};
 		}
 
-		auto spirv = tryGenSPIRVFromShaderc(sourceCode, ci.stage, ci.shaderLang, (ci.pathToSource.empty() ? "inline source" : ci.pathToSource.string().c_str()));
+		daxa::Result<std::vector<u32>> spirv = daxa::ResultErr{};
+		if (ci.shaderLang == ShaderLang::GLSL) {
+			spirv = tryGenSPIRVFromShaderc(sourceCode, ci.stage, ci.shaderLang, (ci.pathToSource.empty() ? "inline source" : ci.pathToSource.string().c_str()), ci.defines);
+		} 
+		else {
+			spirv = tryGenSPIRVFromDxc(sourceCode, ci.stage, ci.entryPoint, (ci.pathToSource.empty() ? "inline source" : ci.pathToSource.string().c_str()), ci.defines);
+		}
 		if (spirv.isErr()) {
 			return ResultErr{ spirv.message() };
 		}
@@ -249,7 +432,7 @@ namespace daxa {
 		shadMod->shaderStage = ci.stage;
 		shadMod->deviceBackend = deviceBackend;
 
-		if (daxa::gpu::instance->pfnSetDebugUtilsObjectNameEXT != nullptr && ci.debugName != nullptr) {
+		if (daxa::instance->pfnSetDebugUtilsObjectNameEXT != nullptr && ci.debugName != nullptr) {
 			shadMod->debugName = ci.debugName;
 
 			VkDebugUtilsObjectNameInfoEXT imageNameInfo {
@@ -259,14 +442,70 @@ namespace daxa {
 				.objectHandle = (uint64_t)shadMod->shaderModule,
 				.pObjectName = ci.debugName,
 			};
-			daxa::gpu::instance->pfnSetDebugUtilsObjectNameEXT(deviceBackend->device.device, &imageNameInfo);
+			daxa::instance->pfnSetDebugUtilsObjectNameEXT(deviceBackend->device.device, &imageNameInfo);
 		}
 
 		return { ShaderModuleHandle{ shadMod } };
 	}
 
-	class FileIncluder : public shaderc::CompileOptions::IncluderInterface {
+	class DxcFileIncluder : public IDxcIncludeHandler {
 	public:
+		std::shared_ptr<PipelineCompilerShadedData> sharedData = {};
+		ComPtr<IDxcUtils> pUtils;
+		ComPtr<IDxcIncludeHandler> pDefaultIncludeHandler;
+		HRESULT LoadSource(LPCWSTR pFilename, IDxcBlob** ppIncludeSource) override
+		{
+			if (pFilename[0] == '.') {
+				pFilename += 2;
+			}
+
+			auto result = sharedData->findFullPathOfFile(pFilename);
+			if (result.isErr()) {
+				*ppIncludeSource = nullptr;
+				return SCARD_E_FILE_NOT_FOUND;
+			}
+			auto fullPath = result.value();
+			auto searchPred = [&](std::filesystem::path const& p){ return p == fullPath; };
+
+			ComPtr<IDxcBlobEncoding> pEncoding;
+			if (std::find_if(sharedData->currentShaderSeenFiles.begin(), sharedData->currentShaderSeenFiles.end(), searchPred) != sharedData->currentShaderSeenFiles.end()) {
+				// Return empty string blob if this file has been included before
+				static const char nullStr[] = " ";
+				pUtils->CreateBlob(nullStr, ARRAYSIZE(nullStr), CP_UTF8, pEncoding.GetAddressOf());
+				*ppIncludeSource = pEncoding.Detach();
+				return S_OK;
+			}
+			else {
+				sharedData->observedHotLoadFiles->insert({ fullPath, std::chrono::file_clock::now() });
+			}
+
+            auto str_result = sharedData->tryLoadShaderSourceFromFile(fullPath);
+            if (str_result.isErr()) {
+				*ppIncludeSource = nullptr;
+				return SCARD_E_INVALID_PARAMETER;
+			}
+            std::string str = str_result.value();
+
+			pUtils->CreateBlob(str.data(), static_cast<u32>(str.size()), CP_UTF8, pEncoding.GetAddressOf());
+			*ppIncludeSource = pEncoding.Detach();
+			return S_OK;
+		}
+
+		HRESULT QueryInterface(REFIID riid, void * * ppvObject) override
+		{
+			return pDefaultIncludeHandler->QueryInterface(riid, ppvObject);
+		}
+
+		ULONG STDMETHODCALLTYPE AddRef(void) override {	return 0; }
+		ULONG STDMETHODCALLTYPE Release(void) override { return 0; }
+
+	};
+
+	class ShadercFileIncluder : public shaderc::CompileOptions::IncluderInterface {
+	public:
+		constexpr static inline size_t DELETE_SOURCE_NAME = 0x1;
+		constexpr static inline size_t DELETE_CONTENT = 0x2;
+
 		virtual shaderc_include_result* GetInclude(
 			const char* requested_source,
             shaderc_include_type type,
@@ -277,6 +516,7 @@ namespace daxa {
 			if (include_depth <= 10) {
 				res->source_name = requested_source;
 				res->source_name_length = strlen(requested_source);
+				res->user_data = 0;
 
 				auto result = sharedData->findFullPathOfFile(requested_source);
 				if (result.isOk()) {
@@ -285,15 +525,13 @@ namespace daxa {
 
 					if (std::find_if(sharedData->currentShaderSeenFiles.begin(), sharedData->currentShaderSeenFiles.end(), searchPred) == sharedData->currentShaderSeenFiles.end()) {
 						std::ifstream ifs{requested_source_path};
-						
 						std::string str;
-
 						ifs.seekg(0, std::ios::end);   
 						str.reserve(ifs.tellg());
 						ifs.seekg(0, std::ios::beg);
-
 						str.assign(std::istreambuf_iterator<char>(ifs), std::istreambuf_iterator<char>());
 
+						res->user_data = reinterpret_cast<void*>(reinterpret_cast<size_t>(res->user_data) | DELETE_CONTENT);
 						char* data = new char[str.size()+1];
 						for (size_t i = 0; i < str.size()+1; i++) {
 							data[i] = str[i];
@@ -301,11 +539,20 @@ namespace daxa {
 						res->content_length = str.size();
 						res->content = data;
 
+						std::string requestedSourcePathAsString = requested_source_path.string();
+
+						char* includerPath = new char[requestedSourcePathAsString.size()+1];
+						for (size_t i = 0; i < requestedSourcePathAsString.size()+1; i++) {
+							includerPath[i] = requestedSourcePathAsString[i];
+						}
+
+						res->source_name = const_cast<const char*>(includerPath);
+						res->user_data = reinterpret_cast<void*>(reinterpret_cast<size_t>(res->user_data) | DELETE_SOURCE_NAME);;
 						sharedData->currentShaderSeenFiles.push_back(requested_source);
 						sharedData->observedHotLoadFiles->insert({requested_source_path,std::filesystem::last_write_time(requested_source_path)});
 					} else {
 						// double includes are ignored
-						res->content = "";
+						res->content = nullptr;
 						res->content_length = 0;
 					}
 				} else {
@@ -313,43 +560,67 @@ namespace daxa {
 					res->content = "could not find file";
 					res->content_length = strlen(res->content);
 
-					res->source_name = "";
+					res->source_name = nullptr;
 					res->source_name_length = 0;
 				}
 			}
 			else {
 				// max include depth exceeded
 				res->content = "current include depth of 10 was exceeded";
-				res->content_length = strlen(res->content);
+				res->content_length = std::strlen(res->content);
 
-				res->source_name = "";
+				res->source_name = nullptr;
 				res->source_name_length = 0;
 			}
 			return res;
 		}
 
     	virtual void ReleaseInclude(shaderc_include_result* data) override {
-			if (data->source_name_length > 0 && data->content != "") {
-				delete data->content;
+			if (data) {
+				if (reinterpret_cast<size_t>(data->user_data) & DELETE_CONTENT) {
+					delete data->content;
+				}
+				if (reinterpret_cast<size_t>(data->source_name) & DELETE_SOURCE_NAME) {
+					delete data->source_name;
+				}
+				delete data;
 			}
-
-			delete data;
 		};
 
 		std::shared_ptr<PipelineCompilerShadedData> sharedData = {};
 	};
 
-    PipelineCompiler::PipelineCompiler(std::shared_ptr<gpu::DeviceBackend> deviceBackend, std::shared_ptr<gpu::BindingSetLayoutCache> bindSetLayoutCache) 
+    PipelineCompiler::PipelineCompiler(std::shared_ptr<DeviceBackend> deviceBackend, std::shared_ptr<BindingSetLayoutCache> bindSetLayoutCache) 
 		: deviceBackend{ deviceBackend }
 		, bindSetLayoutCache{ bindSetLayoutCache }
 		, sharedData{ std::make_shared<PipelineCompilerShadedData>() }
+		, recreationCooldown{ 250 }
+		, backend{ std::unique_ptr<void, void(*)(void*)>(new Backend(), backendDeletor) }
 	{
-		auto includer = std::make_unique<FileIncluder>();
+		auto includer = std::make_unique<ShadercFileIncluder>();
 		includer->sharedData = sharedData;
-		options.SetIncluder(std::move(includer));
+		BACKEND.options.SetIncluder(std::move(includer));
+		if (!SUCCEEDED(DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(BACKEND.dxcUtils.ReleaseAndGetAddressOf())))) {
+			std::cout << "[[DXA ERROR]] could not create DXC Instance" << std::endl;
+		};
+
+		if (!SUCCEEDED(DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&BACKEND.dxcCompiler)))) {
+			std::cout << "[[DXA ERROR]] could not create DXC Compiler" << std::endl;
+		}
+
+		ComPtr<DxcFileIncluder> dxcIncluder = new DxcFileIncluder();
+		dxcIncluder->sharedData = sharedData;
+		dxcIncluder->pUtils = BACKEND.dxcUtils;
+		BACKEND.dxcUtils->CreateDefaultIncludeHandler(dxcIncluder->pDefaultIncludeHandler.ReleaseAndGetAddressOf());
+		BACKEND.dxcIncludeHandler = dxcIncluder;
 	}
 
-    bool PipelineCompiler::checkIfSourcesChanged(gpu::PipelineHandle& pipeline) {
+    bool PipelineCompiler::checkIfSourcesChanged(PipelineHandle& pipeline) {
+		std::chrono::time_point<std::chrono::file_clock> now = std::chrono::file_clock::now();
+		if (std::chrono::duration_cast<std::chrono::milliseconds>(now - pipeline->lastRecreationCheckTimePoint) < recreationCooldown) {
+			return false;
+		}
+		pipeline->lastRecreationCheckTimePoint = now;
 		bool reload = false;
 		for (auto& [path, recordedWriteTime] : pipeline->observedHotLoadFiles) {
 			auto ifs = std::ifstream(path);
@@ -372,8 +643,8 @@ namespace daxa {
 		return reload;
 	}
 
-	Result<gpu::PipelineHandle> PipelineCompiler::recreatePipeline(gpu::PipelineHandle const& pipeline) {
-		auto handleResult = [&](Result<gpu::PipelineHandle> const& result) -> Result<gpu::PipelineHandle> {
+	Result<PipelineHandle> PipelineCompiler::recreatePipeline(PipelineHandle const& pipeline) {
+		auto handleResult = [&](Result<PipelineHandle> const& result) -> Result<PipelineHandle> {
 			if (result.isOk()) {
 				return {std::move(result.value())};
 			}
@@ -391,6 +662,18 @@ namespace daxa {
 		}
 		else {
 			DAXA_ASSERT_M(false, "unreachable. missing arm for potential new variant type");
+            return Result<PipelineHandle>{nullptr};
+		}
+	}
+
+	
+    void PipelineCompiler::recreateIfChanged(PipelineHandle& pipeline) {
+		if (checkIfSourcesChanged(pipeline)) {
+			auto result = recreatePipeline(pipeline);
+			std::cout << result << std::endl;
+			if (result.isOk()) {
+				pipeline = result.value();
+			}
 		}
 	}
 
@@ -399,6 +682,10 @@ namespace daxa {
     }
 
     Result<Path> PipelineCompilerShadedData::findFullPathOfFile(Path const& file) {
+		std::ifstream ifs{file};
+		if (ifs.good()) {
+			return { file };
+		}
         Path potentialPath;
         for (auto& root : this->rootPaths) {
             potentialPath.clear();
@@ -416,11 +703,11 @@ namespace daxa {
         return ResultErr{ .message = std::move(errorMessage) };
     }
 
-    Result<gpu::PipelineHandle> PipelineCompiler::createGraphicsPipeline(gpu::GraphicsPipelineBuilder const& builder) {
+    Result<PipelineHandle> PipelineCompiler::createGraphicsPipeline(GraphicsPipelineBuilder const& builder) {
         DAXA_ASSERT_M(!builder.bVertexAtrributeBindingBuildingOpen, "vertex attribute bindings must be completed before creating a pipeline");
 
-		auto pipelineHandle = gpu::PipelineHandle{ std::make_shared<gpu::Pipeline>() };
-		gpu::Pipeline& ret = *pipelineHandle;
+		auto pipelineHandle = PipelineHandle{ std::make_shared<Pipeline>() };
+		Pipeline& ret = *pipelineHandle;
 		ret.deviceBackend = deviceBackend;
 		ret.bindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
 		ret.colorAttachmentFormats = builder.colorAttachmentFormats;
@@ -431,9 +718,9 @@ namespace daxa {
 		sharedData->observedHotLoadFiles = &ret.observedHotLoadFiles;
 
 		std::vector<VkPushConstantRange> pushConstants;
-		std::vector<gpu::BindingSetDescription> bindingSetDescriptions;
+		std::vector<BindingSetDescription> bindingSetDescriptions;
 		std::vector<VkPipelineShaderStageCreateInfo> shaderStageCreateInfo;
-		std::vector<gpu::ShaderModuleHandle> shaderModules;
+		std::vector<ShaderModuleHandle> shaderModules;
 		shaderModules.reserve(builder.shaderModuleCIs.size());
 
 		for (auto& shaderCI : builder.shaderModuleCIs) {
@@ -576,11 +863,12 @@ namespace daxa {
 		DAXA_CHECK_VK_RESULT_M(d, "failed to create graphics pipeline");
 
 		ret.setPipelineDebugName(deviceBackend->device.device, builder.debugName.c_str());
+		ret.lastRecreationCheckTimePoint = std::chrono::file_clock::now();
 
 		return pipelineHandle;
     }
 
-	Result<gpu::PipelineHandle> PipelineCompiler::createComputePipeline(gpu::ComputePipelineCreateInfo const& ci) {
+	Result<PipelineHandle> PipelineCompiler::createComputePipeline(ComputePipelineCreateInfo const& ci) {
 		sharedData->currentShaderSeenFiles.clear();
 
 		auto pipelineHandle = PipelineHandle{ std::make_shared<Pipeline>() };
@@ -592,7 +880,7 @@ namespace daxa {
 		sharedData->observedHotLoadFiles = &ret.observedHotLoadFiles;
 
 		auto result = tryCreateShaderModule(ci.shaderCI);
-		gpu::ShaderModuleHandle shader;
+		ShaderModuleHandle shader;
 		if (result.isOk()) {
 			shader = result.value();
 		} else {
@@ -622,6 +910,15 @@ namespace daxa {
 
 		std::vector<VkDescriptorSetLayout> descLayouts = processReflectedDescriptorData(bindingSetDescriptions, *bindSetLayoutCache, ret.bindingSetLayouts);
 
+		if (ci.pushConstantSize > 0) {
+			pushConstants.clear();
+			pushConstants.push_back(VkPushConstantRange{
+    			.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+				.offset = 0,
+    			.size = static_cast<u32>(ci.pushConstantSize),
+			});
+		}
+
 		// create pipeline layout:
 		VkPipelineLayoutCreateInfo pipelineLayoutCI{
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
@@ -645,6 +942,7 @@ namespace daxa {
 		DAXA_CHECK_VK_RESULT_M(vkCreateComputePipelines(deviceBackend->device.device, nullptr, 1, &pipelineCI, nullptr, &ret.pipeline), "failed to create compute pipeline");
 
 		ret.setPipelineDebugName(deviceBackend->device.device, ci.debugName);
+		ret.lastRecreationCheckTimePoint = std::chrono::file_clock::now();
 
 		return pipelineHandle;
 	}

@@ -13,6 +13,8 @@
     "fmt",
     "glad",
     "cgltf",
-    "shaderc"
+    "shaderc",
+    "tinyexr",
+    "dxc"
   ]
 }

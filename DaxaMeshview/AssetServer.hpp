@@ -98,7 +98,7 @@ daxa::Result<VkSamplerAddressMode> glSamplerAdressModeToVk(int glCode) {
 
 class AssetCache {
 public:
-    AssetCache(daxa::gpu::DeviceHandle& d, std::vector<std::filesystem::path> const& rp, std::shared_ptr<daxa::ImageCache>& ic)
+    AssetCache(daxa::DeviceHandle& d, std::vector<std::filesystem::path> const& rp, std::shared_ptr<daxa::ImageCache>& ic)
         : device{ d }
         , rootPaths{ rp }
         , imgCache{ ic }
@@ -106,53 +106,56 @@ public:
 
     }
 
-    daxa::gpu::BufferHandle loadBuffer(daxa::gpu::CommandListHandle& cmdList, cgltf_accessor& accessor, VkBufferUsageFlagBits usage) {
+    daxa::BufferHandle loadBuffer(daxa::CommandListHandle& cmdList, cgltf_accessor& accessor, VkBufferUsageFlagBits usage) {
 
-        VkBufferUsageFlags usageFlags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | usage;
+        // VkBufferUsageFlags usageFlags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | usage;
 
-        daxa::gpu::BufferHandle gpuBuffer;
+        daxa::BufferHandle gpuBuffer;
 
         if (usage & VK_BUFFER_USAGE_INDEX_BUFFER_BIT) {
             gpuBuffer = device->createBuffer({
                 .size = sizeof(u32) * accessor.count,
-                .usage = usageFlags,
+                //.usage = usageFlags,
                 .debugName = "an index buffer",
             });
         } else if (usage & VK_BUFFER_USAGE_VERTEX_BUFFER_BIT) {
             gpuBuffer = device->createBuffer({
                 .size = accessor.stride * accessor.count,
-                .usage = usageFlags,
+                //.usage = usageFlags,
                 .debugName = "a vertex buffer",
             });
         }
 
-        void* cpuSideBuffPtr = (void*)((u8*)(accessor.buffer_view->buffer->data) + accessor.buffer_view->offset + accessor.offset);
+        void* cpuSideBuffPtr = reinterpret_cast<void*>(reinterpret_cast<u8*>(accessor.buffer_view->buffer->data) + accessor.buffer_view->offset + accessor.offset);
 
         if ((usage & VK_BUFFER_USAGE_INDEX_BUFFER_BIT) && accessor.stride != 4) {
-            auto mm = cmdList->mapMemoryStagedBuffer<u32>(gpuBuffer, sizeof(u32) * accessor.count, 0);
+            auto mm = cmdList.mapMemoryStagedBuffer(gpuBuffer, sizeof(u32) * accessor.count, 0);
 
             switch (accessor.stride) {
                 case 1:
-                for (int i = 0; i < accessor.count; i++) {
-                    mm.hostPtr[i] = ((u8*)cpuSideBuffPtr)[i];
+                for (size_t i = 0; i < accessor.count; i++) {
+                    reinterpret_cast<u32*>(mm.hostPtr)[i] = (reinterpret_cast<u8*>(cpuSideBuffPtr))[i];
                 }
                 break;
                 case 2:
-                for (int i = 0; i < accessor.count; i++) {
-                    mm.hostPtr[i] = ((u16*)cpuSideBuffPtr)[i];
+                for (size_t i = 0; i < accessor.count; i++) {
+                    reinterpret_cast<u32*>(mm.hostPtr)[i] = (reinterpret_cast<u16*>(cpuSideBuffPtr))[i];
                 }
                 break;
                 case 8:
-                for (int i = 0; i < accessor.count; i++) {
-                    mm.hostPtr[i] = ((u64*)cpuSideBuffPtr)[i];
+                for (size_t i = 0; i < accessor.count; i++) {
+                    reinterpret_cast<u32*>(mm.hostPtr)[i] = static_cast<u32>(reinterpret_cast<u64*>(cpuSideBuffPtr)[i]);
                 }
                 break;
             }
         } else {
-            cmdList->copyHostToBuffer({
-                .src = cpuSideBuffPtr,
+            cmdList.singleCopyHostToBuffer({
+                .src = reinterpret_cast<u8*>(cpuSideBuffPtr),
                 .dst = gpuBuffer,
-                .size = accessor.stride * accessor.count,
+                .region = {
+                    .size = accessor.stride * accessor.count
+                }
+                //.size = accessor.stride * accessor.count,
             });
         }
 
@@ -160,26 +163,26 @@ public:
     }
 
     daxa::EntityHandle nodeToEntity(
-        daxa::gpu::CommandListHandle& cmdList,
+        daxa::CommandListHandle& cmdList,
         daxa::EntityHandle* parentEnt, 
         cgltf_node* node, 
         daxa::EntityComponentManager& ecm, 
         daxa::EntityComponentView<daxa::TransformComp, ModelComp, ChildComp, ParentComp>& view,
         cgltf_data* data,
-        std::vector<daxa::gpu::BufferHandle>& buffers
+        std::vector<daxa::BufferHandle>& buffers
     ) {
         glm::mat4 transform{1.0f};
         if (node->has_matrix) {
-            transform = *(glm::mat4*)&node->matrix;
+            transform = *reinterpret_cast<glm::mat4*>(&node->matrix);
         } else {
             if (node->has_translation) {
-                transform *= glm::translate(glm::mat4{ 1.0f }, *(glm::vec3*)&node->translation);
+                transform *= glm::translate(glm::mat4{ 1.0f }, *reinterpret_cast<glm::vec3*>(&node->translation));
             }
             if (node->has_rotation) {
-                transform *= glm::toMat4(*(glm::f32quat*)&node->rotation);
+                transform *= glm::toMat4(*reinterpret_cast<glm::f32quat*>(&node->rotation));
             }
             if (node->has_scale) {
-                transform *= glm::scale(glm::mat4{1.0f}, *(glm::vec3*)&node->scale);
+                transform *= glm::scale(glm::mat4{1.0f}, *reinterpret_cast<glm::vec3*>(&node->scale));
             }
         }
 
@@ -199,21 +202,21 @@ public:
             
             ModelComp& model = view.addComp(ent, ModelComp{});
 
-            for (auto primI = 0; primI < rootMesh.primitives_count; primI++) {
+            for (size_t primI = 0; primI < rootMesh.primitives_count; primI++) {
                 auto& prim = rootMesh.primitives[primI];
                 Primitive meshPrim;
 
-                meshPrim.indexCount = prim.indices->count;
-                size_t bufferIndex = prim.indices - data->accessors;
+                meshPrim.indexCount = static_cast<u32>(prim.indices->count);
+                size_t bufferIndex = static_cast<size_t>(std::distance(data->accessors, prim.indices));
                 //printf("use buffer with index %i as index buffer\n", bufferIndex);
                 if (!buffers[bufferIndex]) {
                     buffers[bufferIndex] = loadBuffer(cmdList, *prim.indices, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
                 }
                 meshPrim.indiexBuffer = buffers[bufferIndex];
 
-                for (int attrI = 0; attrI < prim.attributes_count; attrI++) {
+                for (size_t attrI = 0; attrI < prim.attributes_count; attrI++) {
                     auto& attribute = prim.attributes[attrI];
-                    size_t bufferIndexOfAttrib = attribute.data - data->accessors;
+                    size_t bufferIndexOfAttrib = static_cast<size_t>(std::distance(data->accessors, attribute.data));
                     
                     if (!buffers[bufferIndexOfAttrib]) {
                         buffers[bufferIndexOfAttrib] = loadBuffer(cmdList, *attribute.data, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
@@ -236,15 +239,16 @@ public:
                             meshPrim.vertexNormals = buffers[bufferIndexOfAttrib];
                             break;
                         case cgltf_attribute_type_tangent:
-                            printf("use buffer with index: %i as tantents vertex buffer\n", bufferIndexOfAttrib);
+                            printf("use buffer with index: %llu as tantents vertex buffer\n", bufferIndexOfAttrib);
                             meshPrim.vertexTangents = buffers[bufferIndexOfAttrib];
                             break;
+                        default: break;
                     }
                 }
 
                 if (prim.material->pbr_metallic_roughness.base_color_texture.texture) {
-                    size_t textureIndex = prim.material->pbr_metallic_roughness.base_color_texture.texture - data->textures;
-                    meshPrim.albedoTexture = imgCache->get(
+                    size_t textureIndex = static_cast<size_t>(std::distance(data->textures, prim.material->pbr_metallic_roughness.base_color_texture.texture));
+                    meshPrim.albedoMap = imgCache->get(
                         {
                             .path = texturePaths[textureIndex],
                             .viewFormat = VK_FORMAT_R8G8B8A8_SRGB,
@@ -256,8 +260,8 @@ public:
 
                 if (prim.material->normal_texture.texture) {
                     printf("normals\n");
-                    size_t textureIndex = prim.material->normal_texture.texture - data->textures;
-                    meshPrim.normalTexture = imgCache->get(
+                    size_t textureIndex = static_cast<size_t>(std::distance(data->textures, prim.material->normal_texture.texture));
+                    meshPrim.normalMap = imgCache->get(
                         {
                             .path = texturePaths[textureIndex],
                             .viewFormat = VK_FORMAT_R8G8B8A8_UNORM,
@@ -273,7 +277,7 @@ public:
             //printf("node has no mesh\n");
         }
 
-        for (int childI = 0; childI < node->children_count; childI++) {
+        for (size_t childI = 0; childI < node->children_count; childI++) {
             nodeToEntity(cmdList, &ent, node->children[childI], ecm, view, data, buffers);
         }
 
@@ -281,7 +285,7 @@ public:
     }
 
     daxa::Result<daxa::EntityHandle> loadScene(
-        daxa::gpu::CommandListHandle& cmdList,
+        daxa::CommandListHandle& cmdList,
         std::filesystem::path path
     ) {
         if (!std::filesystem::exists(path)) {
@@ -308,10 +312,10 @@ public:
         // path now is the relative path to the folder of the gltf file, this is used to load other data now
         path.remove_filename(); 
 
-        for (int i = 0; i < data->textures_count; i++) {
+        for (size_t i = 0; i < data->textures_count; i++) {
             auto& texture = data->textures[i];
 
-            daxa::gpu::SamplerCreateInfo samplerInfo = {};
+            daxa::SamplerCreateInfo samplerInfo = {};
             {
                 auto ret = glSamplingToVkSampling(texture.sampler->min_filter);
                 if (ret.isErr()) {
@@ -359,7 +363,7 @@ public:
             texturePaths.push_back(texPath);
         }
 
-        std::vector<daxa::gpu::BufferHandle> buffers;
+        std::vector<daxa::BufferHandle> buffers;
         buffers.resize(data->accessors_count);
 
         auto view = entityCache.view<daxa::TransformComp, ModelComp, ChildComp, ParentComp>();
@@ -367,16 +371,17 @@ public:
         view.addComp(ret, daxa::TransformComp{ .mat = glm::mat4{1.0f} });
         view.addComp(ret, ParentComp{});
 
-        for (int scene_i = 0; scene_i < data->scenes_count; scene_i++) {
+        for (size_t scene_i = 0; scene_i < data->scenes_count; scene_i++) {
             auto& scene = data->scenes[scene_i];
-            for (int rootNodeI = 0; rootNodeI < scene.nodes_count; rootNodeI++) {
+            for (size_t rootNodeI = 0; rootNodeI < scene.nodes_count; rootNodeI++) {
                 auto* rootNode = scene.nodes[rootNodeI];
 
                 nodeToEntity(cmdList, &ret, rootNode, entityCache, view, data, buffers);
             }
         }
 
-        cmdList->insertMemoryBarrier(daxa::gpu::FULL_MEMORY_BARRIER);
+        cmdList.queueMemoryBarrier(daxa::FULL_MEMORY_BARRIER);
+        cmdList.insertQueuedBarriers();
         
         textureSamplerInfos.clear();
         texturePaths.clear();
@@ -408,7 +413,7 @@ public:
         }
     }
 
-    daxa::Result<daxa::EntityHandle> getScene(daxa::gpu::CommandListHandle& cmdList, std::filesystem::path const& path, daxa::EntityComponentManager& out) {
+    daxa::Result<daxa::EntityHandle> getScene(daxa::CommandListHandle& cmdList, std::filesystem::path const& path, daxa::EntityComponentManager& out) {
         if (!cache.contains(path.string())) {
             auto rootEnt = loadScene(cmdList, path);
             if (rootEnt.isErr()) {
@@ -426,9 +431,9 @@ public:
     }
 
 private:
-    std::vector<daxa::gpu::SamplerCreateInfo> textureSamplerInfos;
+    std::vector<daxa::SamplerCreateInfo> textureSamplerInfos;
     std::vector<std::filesystem::path> texturePaths;
-    daxa::gpu::DeviceHandle device = {};
+    daxa::DeviceHandle device = {};
     std::vector<std::filesystem::path> rootPaths = {};
     std::shared_ptr<daxa::ImageCache> imgCache = {};
     daxa::EntityComponentManager entityCache = {};
