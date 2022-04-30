@@ -46,7 +46,7 @@ struct Game {
 
     static Player3D reset_player() {
         Player3D result{};
-        result.pos = glm::vec3(World::DIM * Chunk::DIM) / 2.0f;
+        result.pos = glm::vec3(World::DIM * Chunk::DIM) / 2.0f + 0.2f;
         result.pos.y = -10.0f;
         result.rot = {0.001f, -0.6f, 0.0f};
         return result;
@@ -195,7 +195,7 @@ struct Game {
             HelpMarker("Speed to move (Blocks/s)");
             ImGui::SliderFloat("Sprint Speed", &player.sprint_speed, 1.1f, 50.0f);
             HelpMarker("Sprint Multiplier");
-            ImGui::SliderFloat("FOV", &player.camera.fov, 0.1f, 170.0f);
+            ImGui::SliderFloat("FOV", &player.camera.fov, 0.1f, 179.9f);
             HelpMarker("Vertical field of view (Degrees)");
             ImGui::SliderFloat("Sensitivity", &player.mouse_sens, 0.01f, 10.0f);
             HelpMarker("Mouse rotation speed (Radians/Pixels_moved/200)");

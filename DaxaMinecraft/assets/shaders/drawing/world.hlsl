@@ -49,7 +49,7 @@ void draw_world(
 
     for (uint yi = 0; yi < subsamples.y; ++yi) {
         for (uint xi = 0; xi < subsamples.x; ++xi) {
-            float2 view_uv = (uv + inv_frame_dim * float2(xi, yi) * inv_subsamples) * globals[0].fov * float2(aspect, 1);
+            float2 view_uv = (uv + inv_frame_dim * float2(xi, yi) * inv_subsamples) * player_buffer[0].player.camera.fov * float2(aspect, 1);
 
             cam_ray.nrm = normalize(front + view_uv.x * right + view_uv.y * up);
             cam_ray.inv_nrm = 1 / cam_ray.nrm;

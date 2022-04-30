@@ -10,6 +10,16 @@ struct DDA_RunState {
     float dist;
 };
 
+DDA_RunState default_dda_run_state() {
+    DDA_RunState result;
+    result.hit = false;
+    result.outside_bounds = false;
+    result.side = 0;
+    result.total_steps = 0;
+    result.dist = 0;
+    return result;
+}
+
 uint get_lod(StructuredBuffer<Globals> globals, in float3 p) {
     BlockID block_id = load_block_id(globals, int3(p));
     if (is_block_occluding(block_id))

@@ -147,8 +147,8 @@ void get_texture_info(in StructuredBuffer<Globals> globals, in RayIntersection r
     float4 prev_val = output_image[pixel_i.xy];
     float4 new_val = float4(pow(color, float3(1, 1, 1)), 1);
     // if (pixel_i.x > globals[0].frame_dim.x / 2) {
-        output_image[pixel_i.xy] = prev_val * 0.8 + new_val * 0.2;
+    //    output_image[pixel_i.xy] = prev_val * 0.8 + new_val * 0.2;
     // } else {
-    // output_image[pixel_i.xy] = new_val;
+    output_image[pixel_i.xy] = new_val;
     // }
 }

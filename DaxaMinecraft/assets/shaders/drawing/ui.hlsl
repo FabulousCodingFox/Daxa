@@ -14,8 +14,10 @@ bool draw_ui(
 
         uv = uv * 2 - 1;
         uv.y *= -1;
+        uv.x -= 0.2;
+        uv *= globals[0].inventory_index == inventory_i ? 0.8 : 1.2;
         Ray ray;
-        ray.o = float3(2, -0.1, 2) + uv.x * normalize(float3(1, 0, -1)) - uv.y * normalize(float3(-1, 10, -1));
+        ray.o = float3(2, 0, 2) + uv.x * normalize(float3(1, 0, -1)) - uv.y * normalize(float3(0, 1, 0));
         ray.nrm = normalize(float3(-1, 0.4, -1.2));
         ray.inv_nrm = 1 / ray.nrm;
 
@@ -33,7 +35,7 @@ bool draw_ui(
         float3 tex_col = daxa::getTexture2DArray<float4>(globals[0].texture_index).Load(int4(tex_uv.x * 16, tex_uv.y * 16, tex_id, 0)).rgb;
 
         if (inter.hit) {
-            color = tex_col;
+            color = tex_col * dot(normalize(float3(1, -3, 2)), inter.nrm) * 2;
             return true;
         }
 

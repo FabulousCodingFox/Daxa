@@ -16,12 +16,12 @@ struct ChunkBlockPresence {
 };
 
 struct Globals {
-    float4x4 viewproj_mat;
-    float4 pos;
+    // float4x4 viewproj_mat;
+    // float4 pos;
     float4 pick_pos[2];
     int2 frame_dim;
     float time;
-    float fov;
+    // float fov;
 
     uint texture_index;
     uint empty_chunk_index;

@@ -30,6 +30,7 @@ struct Player {
     float4 vel;
     float4 rot;
     Camera camera;
+    uint on_ground;
 
     void update(in StructuredBuffer<Globals> globals, in PlayerInput input) {
         float delta_dist = input.speed * input.delta_time;
@@ -83,22 +84,72 @@ struct Player {
         if (input.move_down())
             motion_vec += float4(0, delta_dist, 0, 0);
 
-        Ray ray;
-        ray.o = globals[0].pos.xyz;
-        ray.nrm = normalize(motion_vec.xyz);
-        ray.inv_nrm = 1 / ray.nrm;
-        RayIntersection view_chunk_intersection = trace_chunks(globals, ray);
-
+        // if (input.move_up() && on_ground)
+        //     vel.y = -1000;
+        // else
+        //     vel.y += 9.8 * input.delta_time * 10;
+        // motion_vec.y = vel.y * input.delta_time;
+        // float3 b_min = float3(0, 0, 0), b_max = float3(int(CHUNK_NX * CHUNK_INDEX_REPEAT_X), int(CHUNK_NY * CHUNK_INDEX_REPEAT_Y), int(CHUNK_NZ * CHUNK_INDEX_REPEAT_Z)) * int(CHUNK_SIZE);
+        // bool inside_world = point_box_contains(pos.xyz, b_min, b_max);
+        // Ray ray;
+        // ray.o = pos.xyz;
+        // ray.nrm = normalize(motion_vec.xyz);
+        // ray.inv_nrm = 1 / ray.nrm;
+        // DDA_RunState dda_run_state = default_dda_run_state();
         // float vec_length = length(motion_vec.xyz);
-        // if (vec_length != 0) {
-        //     motion_vec /= vec_length;
-        //     if (view_chunk_intersection.hit) {
-        //         vec_length = clamp(vec_length, 0, view_chunk_intersection.dist);
+        // if (inside_world) {
+        //     on_ground = false;
+        //     run_dda_main(globals, ray, dda_run_state, b_min, b_max, 2);
+        //     if (vec_length != 0) {
+        //         motion_vec /= vec_length;
+        //         if (dda_run_state.hit) {
+        //             if (vec_length > dda_run_state.dist - 0.4) {
+        //                 on_ground = true;
+        //                 vel.y = 0;
+        //             }
+        //             vec_length = clamp(vec_length, 0, dda_run_state.dist - 0.4);
+        //             // if (dda_run_state.side == 1) {
+        //             // }
+        //         }
+        //         motion_vec *= vec_length;
         //     }
-        //     motion_vec *= vec_length;
         // }
 
         pos += motion_vec;
+
+        // if (inside_world && vec_length != 0) {
+        //     ray.o = pos.xyz;
+        //     if (ray_chunk_intersection.hit) {
+        //         ray.nrm = normalize(-ray_chunk_intersection.nrm);
+        //         ray.inv_nrm = 1 / ray.nrm;
+        //         ray_chunk_intersection = trace_chunks(globals, ray);
+        //         if (ray_chunk_intersection.hit) {
+        //             pos -= float4(ray.nrm * max(0.5 - ray_chunk_intersection.dist, 0), 0);
+        //         }
+        //     }
+        //     dda_run_state = default_dda_run_state();
+        //     ray.nrm = float3(sign(motion_vec.x), 0.0, 0.0);
+        //     ray.inv_nrm = 1 / ray.nrm;
+        //     run_dda_main(globals, ray, dda_run_state, b_min, b_max, 2);
+        //     if (dda_run_state.hit) {
+        //         pos -= float4(ray.nrm * max(0.4 - dda_run_state.dist, 0), 0);
+        //     }
+        //     dda_run_state = default_dda_run_state();
+        //     ray.nrm = float3(0.0, sign(motion_vec.y), 0.0);
+        //     ray.inv_nrm = 1 / ray.nrm;
+        //     run_dda_main(globals, ray, dda_run_state, b_min, b_max, 2);
+        //     if (dda_run_state.hit) {
+        //         pos -= float4(ray.nrm * max(0.4 - dda_run_state.dist, 0), 0);
+        //     }
+        //     dda_run_state = default_dda_run_state();
+        //     ray.nrm = float3(0.0, 0.0, sign(motion_vec.z));
+        //     ray.inv_nrm = 1 / ray.nrm;
+        //     run_dda_main(globals, ray, dda_run_state, b_min, b_max, 2);
+        //     if (dda_run_state.hit) {
+        //         pos -= float4(ray.nrm * max(0.4 - dda_run_state.dist, 0), 0);
+        //     }
+        // }
+
         pos.w = 0;
     }
 };

@@ -8,9 +8,9 @@
 
     player_buffer[0].player.update(globals, player_buffer[0].input);
 
-    float3 front = mul(globals[0].viewproj_mat, float4(0, 0, 1, 0)).xyz;
+    float3 front = mul(player_buffer[0].player.camera.view_mat, float4(0, 0, 1, 0)).xyz;
     Ray ray;
-    ray.o = globals[0].pos.xyz;
+    ray.o = player_buffer[0].player.pos.xyz;
     ray.nrm = normalize(front);
     ray.inv_nrm = 1 / ray.nrm;
     RayIntersection view_chunk_intersection = trace_chunks(globals, ray);

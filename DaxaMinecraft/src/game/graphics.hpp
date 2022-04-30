@@ -30,6 +30,7 @@ namespace gpu {
         glm::vec4 vel;
         glm::vec4 rot;
         Camera camera;
+        u32 on_ground;
     };
 
     struct ChunkBlockPresence {
@@ -41,12 +42,12 @@ namespace gpu {
     };
 
     struct ComputeGlobals {
-        glm::mat4 viewproj_mat;
-        glm::vec4 pos;
+        // glm::mat4 viewproj_mat;
+        // glm::vec4 pos;
         glm::vec4 pick_pos[2];
         glm::ivec2 frame_dim;
         float time;
-        float fov;
+        // float fov;
 
         u32 texture_index;
         u32 empty_chunk_index;
@@ -376,11 +377,11 @@ struct RenderableWorld {
         auto elapsed = std::chrono::duration<float>(now - start).count();
 
         auto compute_globals = gpu::ComputeGlobals{
-            .viewproj_mat = vp_mat,
-            .pos = glm::vec4(player.pos, 0),
+            // .viewproj_mat = vp_mat,
+            // .pos = glm::vec4(player.pos, 0),
             .frame_dim = {extent.width, extent.height},
             .time = elapsed,
-            .fov = tanf(player.camera.fov * std::numbers::pi_v<f32> / 360.0f),
+            // .fov = tanf(player.camera.fov * std::numbers::pi_v<f32> / 360.0f),
             .texture_index = atlas_texture_array->getDescriptorIndex(),
             .empty_chunk_index = empty_chunk->chunkgen_image_a->getDescriptorIndex(),
             .inventory_index = static_cast<u32>(inventory_index),
