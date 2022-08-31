@@ -3,6 +3,8 @@
 #include "backend/DeviceBackend.hpp"
 #include "backend/BufferBackend.hpp"
 
+#include <string>
+
 namespace daxa {
 	BindingSet::BindingSet(std::shared_ptr<DeviceBackend> deviceBackend, VkDescriptorSet set, std::weak_ptr<BindingSetAllocatorBindingiSetPool> pool, std::shared_ptr<BindingSetLayout const> layout)
 		: deviceBackend{ std::move(deviceBackend) }
