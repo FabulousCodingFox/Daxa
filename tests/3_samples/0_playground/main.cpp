@@ -1,320 +1,81 @@
-#include <0_common/window.hpp>
-#include <thread>
-#include <iostream>
-
-#include "shaders/shared.inl"
-
-#include <daxa/utils/imgui.hpp>
-#include <imgui_impl_glfw.h>
-
+#define DAXA_SHADERLANG DAXA_SHADERLANG_GLSL
 #define APPNAME "Daxa Sample: Playground"
-#define APPNAME_PREFIX(x) ("[" APPNAME "] " x)
-
-#include <daxa/utils/math_operators.hpp>
+#include <0_common/base_app.hpp>
 
 using namespace daxa::types;
-using Clock = std::chrono::high_resolution_clock;
+#include "shaders/shared.inl"
 
-i32 const max_layers = 12;
-i32 const max_levels = 16;
+constexpr auto MAX_VERTS = 1'000'000;
 
-#define MAX_VERTS 10000
-
-struct App : AppWindow<App>
+struct App : BaseApp<App>
 {
-    daxa::Context daxa_ctx = daxa::create_context({
-        .enable_validation = true,
-    });
-    daxa::Device device = daxa_ctx.create_device({
-        .debug_name = APPNAME_PREFIX("device"),
-    });
-
-    daxa::Swapchain swapchain = device.create_swapchain({
-        .native_window = get_native_handle(),
-        .native_window_platform = get_native_platform(),
-        .present_mode = daxa::PresentMode::DO_NOT_WAIT_FOR_VBLANK,
-        .image_usage = daxa::ImageUsageFlagBits::TRANSFER_DST,
-        .debug_name = APPNAME_PREFIX("swapchain"),
-    });
-
-    daxa::PipelineCompiler pipeline_compiler = device.create_pipeline_compiler({
-        .shader_compile_options = {
-            .root_paths = {
-                "tests/3_samples/0_playground/shaders",
-                "include",
-            },
-            .language = daxa::ShaderLanguage::GLSL,
-        },
-        .debug_name = APPNAME_PREFIX("pipeline_compiler"),
-    });
-
-    daxa::ImGuiRenderer imgui_renderer = create_imgui_renderer();
-    auto create_imgui_renderer() -> daxa::ImGuiRenderer
-    {
-        ImGui::CreateContext();
-        ImGui_ImplGlfw_InitForVulkan(glfw_window_ptr, true);
-        return daxa::ImGuiRenderer({
-            .device = device,
-            .pipeline_compiler = pipeline_compiler,
-            .format = swapchain.get_format(),
-        });
-    }
-
     // clang-format off
-    daxa::RasterPipeline raster_pipeline = pipeline_compiler.create_raster_pipeline({
-        .vertex_shader_info = {.source = daxa::ShaderFile{"draw.glsl"}, .compile_options = {.defines = {daxa::ShaderDefine{"DRAW_VERT"}}}},
-        .fragment_shader_info = {.source = daxa::ShaderFile{"draw.glsl"}, .compile_options = {.defines = {daxa::ShaderDefine{"DRAW_FRAG"}}}},
-        .color_attachments = {{
-            .format = swapchain.get_format(),
-            .blend = {
-                .blend_enable = true,
-                .src_color_blend_factor = daxa::BlendFactor::SRC_ALPHA,
-                .dst_color_blend_factor = daxa::BlendFactor::ONE_MINUS_SRC_ALPHA,
-                .src_alpha_blend_factor = daxa::BlendFactor::ONE,
-                .dst_alpha_blend_factor = daxa::BlendFactor::ONE_MINUS_SRC_ALPHA,
-            },
-        }},
-        .raster = {},
+    daxa::RasterPipeline vert_raster_pipeline = pipeline_compiler.create_raster_pipeline({
+        .vertex_shader_info = {.source = daxa::ShaderFile{"draw.glsl"}, .compile_options = {.defines = {{"DRAW_VERT"}}}},
+        .fragment_shader_info = {.source = daxa::ShaderFile{"draw.glsl"}, .compile_options = {.defines = {{"DRAW_FRAG"}}}},
+        .color_attachments = {{.format = swapchain.get_format()}},
+        .raster = {.face_culling = daxa::FaceCullFlagBits::BACK_BIT, .topology = false},
         .push_constant_size = sizeof(DrawPush),
-        .debug_name = APPNAME_PREFIX("raster_pipeline"),
+        .debug_name = APPNAME_PREFIX("vert_raster_pipeline"),
+    }).value();
+    // daxa::ComputePipeline mesh_raster_pipeline = pipeline_compiler.create_compute_pipeline({
+    //     .shader_info = {.source = daxa::ShaderFile{"mesh.glsl"}},
+    //     .debug_name = APPNAME_PREFIX("mesh_raster_pipeline"),
+    // }).value();
+    daxa::RasterPipeline geom_raster_pipeline = pipeline_compiler.create_raster_pipeline({
+        .vertex_shader_info = {.source = daxa::ShaderFile{"draw.glsl"}, .compile_options = {.defines = {{"DRAW_VERT"}, {"USE_GEOM", "1"}}}},
+        .geometry_shader_info = {.source = daxa::ShaderFile{"draw.glsl"}, .compile_options = {.defines = {{"DRAW_GEOM"}, {"USE_GEOM", "1"}}}},
+        .fragment_shader_info = {.source = daxa::ShaderFile{"draw.glsl"}, .compile_options = {.defines = {{"DRAW_FRAG"}, {"USE_GEOM", "1"}}}},
+        .color_attachments = {{.format = swapchain.get_format()}},
+        .raster = {.face_culling = daxa::FaceCullFlagBits::BACK_BIT, .topology = true},
+        .push_constant_size = sizeof(DrawPush),
+        .debug_name = APPNAME_PREFIX("geom_raster_pipeline"),
     }).value();
     // clang-format on
+
+    bool mesh_invalid = true;
+    bool use_geom = false;
 
     daxa::BufferId vertex_buffer = device.create_buffer(daxa::BufferInfo{
         .size = sizeof(DrawVertex) * MAX_VERTS,
         .debug_name = APPNAME_PREFIX("vertex_buffer"),
     });
-    u32 vert_n = 0;
+    daxa::TaskBufferId task_vertex_buffer;
 
-    daxa::ImageMipArraySlice s0 = {
-        .image_aspect = daxa::ImageAspectFlagBits::COLOR | daxa::ImageAspectFlagBits::DEPTH,
-        .base_mip_level = 3,
-        .level_count = 5,
-        .base_array_layer = 2,
-        .layer_count = 4,
-    };
-    daxa::ImageMipArraySlice s1 = {
-        .image_aspect = daxa::ImageAspectFlagBits::COLOR,
-        .base_mip_level = 5,
-        .level_count = 2,
-        .base_array_layer = 3,
-        .layer_count = 4,
-    };
-
-    App() : AppWindow<App>(APPNAME, 1600, 1200) {}
+    daxa::TaskList loop_task_list = record_loop_task_list();
 
     ~App()
     {
         device.wait_idle();
         device.collect_garbage();
-        ImGui_ImplGlfw_Shutdown();
         device.destroy_buffer(vertex_buffer);
-    }
-
-    bool update()
-    {
-        glfwPollEvents();
-        if (glfwWindowShouldClose(glfw_window_ptr))
-        {
-            return true;
-        }
-
-        if (!minimized)
-        {
-            draw();
-        }
-        else
-        {
-            using namespace std::literals;
-            std::this_thread::sleep_for(1ms);
-        }
-
-        return false;
-    }
-
-    void add_rect(DrawVertex *& buffer_ptr, f32vec2 p0, f32vec2 p1, f32vec4 col)
-    {
-        // clang-format off
-        *buffer_ptr = DrawVertex{{p0.x, p0.y, 0.0f, 0.0f}, col}; ++buffer_ptr;
-        *buffer_ptr = DrawVertex{{p1.x, p0.y, 0.0f, 0.0f}, col}; ++buffer_ptr;
-        *buffer_ptr = DrawVertex{{p0.x, p1.y, 0.0f, 0.0f}, col}; ++buffer_ptr;
-
-        *buffer_ptr = DrawVertex{{p1.x, p0.y, 0.0f, 0.0f}, col}; ++buffer_ptr;
-        *buffer_ptr = DrawVertex{{p0.x, p1.y, 0.0f, 0.0f}, col}; ++buffer_ptr;
-        *buffer_ptr = DrawVertex{{p1.x, p1.y, 0.0f, 0.0f}, col}; ++buffer_ptr;
-        // clang-format on
-
-        vert_n += 6;
     }
 
     void ui_update()
     {
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
-        ImGui::Begin("Debug");
-        {
-            i32 mips[2] = {static_cast<i32>(s0.base_mip_level), static_cast<i32>(s0.level_count)};
-            ImGui::SliderInt("Mip Base 0", &mips[0], 0, max_levels - 1);
-            ImGui::SliderInt("Mip Count 0", &mips[1], 1, max_levels - mips[0]);
-            s0.base_mip_level = static_cast<u32>(mips[0]);
-            s0.level_count = static_cast<u32>(mips[1]);
-            i32 arrs[2] = {static_cast<i32>(s0.base_array_layer), static_cast<i32>(s0.layer_count)};
-            ImGui::SliderInt("Array Base 0", &arrs[0], 0, max_layers - 1);
-            ImGui::SliderInt("Array Count 0", &arrs[1], 1, max_layers - arrs[0]);
-            s0.base_array_layer = static_cast<u32>(arrs[0]);
-            s0.layer_count = static_cast<u32>(arrs[1]);
-        }
-        {
-            i32 mips[2] = {static_cast<i32>(s1.base_mip_level), static_cast<i32>(s1.level_count)};
-            ImGui::SliderInt("Mip Base 1", &mips[0], 0, max_levels - 1);
-            ImGui::SliderInt("Mip Count 1", &mips[1], 1, max_levels - mips[0]);
-            s1.base_mip_level = static_cast<u32>(mips[0]);
-            s1.level_count = static_cast<u32>(mips[1]);
-            i32 arrs[2] = {static_cast<i32>(s1.base_array_layer), static_cast<i32>(s1.layer_count)};
-            ImGui::SliderInt("Array Base 1", &arrs[0], 0, max_layers - 1);
-            ImGui::SliderInt("Array Count 1", &arrs[1], 1, max_layers - arrs[0]);
-            s1.base_array_layer = static_cast<u32>(arrs[0]);
-            s1.layer_count = static_cast<u32>(arrs[1]);
-        }
+        ImGui::ShowMetricsWindow();
+        ImGui::Begin("Settings");
+        ImGui::Checkbox("use Geometry shader", &use_geom);
         ImGui::End();
         ImGui::Render();
     }
-
-    void construct_scene(DrawVertex *& buffer_ptr)
+    void on_update()
     {
-        vert_n = 0;
-        using namespace daxa::math_operators;
-
-        auto view_transform = [](auto v)
-        {
-            return (v / f32vec2{static_cast<f32>(max_levels), static_cast<f32>(max_layers)}) * 2.0f - 1.0f;
-        };
-        auto add_int_rect = [&](auto xi, auto yi, auto sx, auto sy, f32 scl, f32vec4 col)
-        {
-            f32vec2 p0 = f32vec2{static_cast<f32>(xi), static_cast<f32>(yi)} + scl * 0.5f;
-            f32vec2 p1 = p0 + f32vec2{static_cast<f32>(sx), static_cast<f32>(sy)} - scl;
-            add_rect(buffer_ptr, view_transform(p0), view_transform(p1), col);
-        };
-
-        for (i32 yi = 0; yi < max_layers; ++yi)
-        {
-            for (i32 xi = 0; xi < max_levels; ++xi)
-            {
-                add_int_rect(xi, yi, 1, 1, 0.1f, {0.1f, 0.1f, 0.1f, 0.5f});
-            }
-        }
-
-        add_int_rect(s0.base_mip_level, s0.base_array_layer, s0.level_count, s0.layer_count, 0.0f, {0.3f, 0.9f, 0.3f, 0.9f});
-        add_int_rect(s1.base_mip_level, s1.base_array_layer, s1.level_count, s1.layer_count, 0.0f, {0.9f, 0.3f, 0.3f, 0.9f});
-
-        auto [s2_rects, s2_rect_n] = s0.subtract(s1);
-        f32vec4 s2_colors[4] = {
-            {0.1f, 0.1f, 0.1f, 0.5f},
-            {0.1f, 0.1f, 0.1f, 0.5f},
-            {0.1f, 0.1f, 0.1f, 0.5f},
-            {0.1f, 0.1f, 0.1f, 0.5f},
-        };
-
-        for (usize i = 0; i < s2_rect_n; ++i)
-        {
-            auto const & s2 = s2_rects[i];
-            add_int_rect(s2.base_mip_level, s2.base_array_layer, s2.level_count, s2.layer_count, 0.2f, s2_colors[i]);
-        }
-    }
-
-    void draw()
-    {
+        reload_pipeline(vert_raster_pipeline);
+        reload_pipeline(geom_raster_pipeline);
         ui_update();
 
-        if (pipeline_compiler.check_if_sources_changed(raster_pipeline))
-        {
-            auto new_pipeline = pipeline_compiler.recreate_raster_pipeline(raster_pipeline);
-            std::cout << new_pipeline.to_string() << std::endl;
-            if (new_pipeline.is_ok())
-            {
-                raster_pipeline = new_pipeline.value();
-            }
-        }
-
-        auto swapchain_image = swapchain.acquire_next_image();
-
-        auto cmd_list = device.create_command_list({
-            .debug_name = APPNAME_PREFIX("cmd_list"),
-        });
-
-        auto vertex_staging_buffer = device.create_buffer({
-            .memory_flags = daxa::MemoryFlagBits::HOST_ACCESS_RANDOM,
-            .size = sizeof(DrawVertex) * MAX_VERTS,
-            .debug_name = APPNAME_PREFIX("vertex_staging_buffer"),
-        });
-        cmd_list.destroy_buffer_deferred(vertex_staging_buffer);
-
-        auto buffer_ptr = device.map_memory_as<DrawVertex>(vertex_staging_buffer);
-        construct_scene(buffer_ptr);
-        device.unmap_memory(vertex_staging_buffer);
-
-        cmd_list.pipeline_barrier({
-            .awaited_pipeline_access = daxa::AccessConsts::HOST_WRITE,
-            .waiting_pipeline_access = daxa::AccessConsts::TRANSFER_READ,
-        });
-
-        cmd_list.copy_buffer_to_buffer({
-            .src_buffer = vertex_staging_buffer,
-            .dst_buffer = vertex_buffer,
-            .size = sizeof(DrawVertex) * vert_n,
-        });
-
-        cmd_list.pipeline_barrier({
-            .awaited_pipeline_access = daxa::AccessConsts::TRANSFER_WRITE,
-            .waiting_pipeline_access = daxa::AccessConsts::VERTEX_SHADER_READ,
-        });
-
-        cmd_list.pipeline_barrier_image_transition({
-            .waiting_pipeline_access = daxa::AccessConsts::COLOR_ATTACHMENT_OUTPUT_WRITE,
-            .before_layout = daxa::ImageLayout::UNDEFINED,
-            .after_layout = daxa::ImageLayout::ATTACHMENT_OPTIMAL,
-            .image_id = swapchain_image,
-        });
-
-        cmd_list.begin_renderpass({
-            .color_attachments = {{.image_view = swapchain_image.default_view(), .load_op = daxa::AttachmentLoadOp::CLEAR, .clear_value = std::array<f32, 4>{0.5f, 0.5f, 0.5f, 1.0f}}},
-            .render_area = {.x = 0, .y = 0, .width = size_x, .height = size_y},
-        });
-        cmd_list.set_pipeline(raster_pipeline);
-        cmd_list.push_constant(DrawPush{
-            .face_buffer = this->device.buffer_reference(vertex_buffer),
-        });
-        cmd_list.draw({.vertex_count = vert_n});
-        cmd_list.end_renderpass();
-
-        imgui_renderer.record_commands(ImGui::GetDrawData(), cmd_list, swapchain_image, size_x, size_y);
-
-        cmd_list.pipeline_barrier_image_transition({
-            .awaited_pipeline_access = daxa::AccessConsts::ALL_GRAPHICS_READ_WRITE,
-            .before_layout = daxa::ImageLayout::ATTACHMENT_OPTIMAL,
-            .after_layout = daxa::ImageLayout::PRESENT_SRC,
-            .image_id = swapchain_image,
-        });
-
-        cmd_list.complete();
-
-        device.submit_commands({
-            .command_lists = {std::move(cmd_list)},
-            .wait_binary_semaphores = {swapchain.get_acquire_semaphore()},
-            .signal_binary_semaphores = {swapchain.get_present_semaphore()},
-            .signal_timeline_semaphores = {
-                {swapchain.get_gpu_timeline_semaphore(), swapchain.get_cpu_timeline_value()}},
-        });
-        device.present_frame({
-            .wait_binary_semaphores = {swapchain.get_present_semaphore()},
-            .swapchain = swapchain,
-        });
+        swapchain_image = swapchain.acquire_next_image();
+        if (swapchain_image.is_empty())
+            return;
+        loop_task_list.execute();
     }
 
     void on_mouse_move(f32, f32) {}
     void on_mouse_button(i32, i32) {}
     void on_key(i32, i32) {}
-
     void on_resize(u32 sx, u32 sy)
     {
         minimized = (sx == 0 || sy == 0);
@@ -323,8 +84,96 @@ struct App : AppWindow<App>
             swapchain.resize();
             size_x = swapchain.info().width;
             size_y = swapchain.info().height;
-            draw();
+            base_on_update();
         }
+    }
+
+    void record_tasks(daxa::TaskList & new_task_list)
+    {
+        task_vertex_buffer = new_task_list.create_task_buffer({.buffer = &vertex_buffer, .debug_name = APPNAME_PREFIX("task_vertex_buffer")});
+        new_task_list.add_task({
+            .used_buffers = {
+                {task_vertex_buffer, daxa::TaskBufferAccess::VERTEX_SHADER_READ_ONLY},
+            },
+            .task = [this](daxa::TaskRuntime runtime)
+            {
+                if (mesh_invalid)
+                {
+                    auto cmd_list = runtime.get_command_list();
+                    auto vertex_staging_buffer = device.create_buffer({
+                        .memory_flags = daxa::MemoryFlagBits::HOST_ACCESS_RANDOM,
+                        .size = sizeof(DrawVertex) * MAX_VERTS,
+                        .debug_name = APPNAME_PREFIX("vertex_staging_buffer"),
+                    });
+                    cmd_list.destroy_buffer_deferred(vertex_staging_buffer);
+                    auto buffer_ptr = device.map_memory_as<DrawVertex>(vertex_staging_buffer);
+
+                    for (u32 i = 0; i < MAX_VERTS; ++i)
+                    {
+                        f32vec2 pos = {0.0f, 0.0f};
+                        pos.x = ((rand() % 1000) * 0.001f - 0.5f) * 2.0f;
+                        pos.y = ((rand() % 1000) * 0.001f - 0.5f) * 2.0f;
+                        *buffer_ptr = DrawVertex{{pos.x, pos.y, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}};
+                        ++buffer_ptr;
+                    }
+
+                    device.unmap_memory(vertex_staging_buffer);
+                    cmd_list.copy_buffer_to_buffer({
+                        .src_buffer = vertex_staging_buffer,
+                        .dst_buffer = vertex_buffer,
+                        .size = sizeof(DrawVertex) * MAX_VERTS,
+                    });
+                    mesh_invalid = false;
+                }
+            },
+            .debug_name = APPNAME_PREFIX("Upload vertices"),
+        });
+
+        // new_task_list.add_task({
+        //     .used_buffers = {
+        //         {task_vertex_buffer, daxa::TaskBufferAccess::COMPUTE_SHADER_READ_ONLY},
+        //     },
+        //     .used_images = {
+        //         {task_swapchain_image, daxa::TaskImageAccess::COLOR_ATTACHMENT, daxa::ImageMipArraySlice{}},
+        //     },
+        //     .task = [this](daxa::TaskRuntime runtime)
+        //     {
+        //         if (!use_geom) {
+        //             auto cmd_list = runtime.get_command_list();
+        //             cmd_list.set_pipeline(mesh_raster_pipeline);
+        //             cmd_list.push_constant(ComputePush{
+        //                 .face_buffer = this->device.buffer_reference(vertex_buffer),
+        //             });
+        //             cmd_list.dispatch(MAX_VERTS);
+        //             cmd_list.end_renderpass();
+        //         }
+        //     },
+        //     .debug_name = APPNAME_PREFIX("'mesh' shader"),
+        // });
+
+        new_task_list.add_task({
+            .used_buffers = {
+                {task_vertex_buffer, daxa::TaskBufferAccess::VERTEX_SHADER_READ_ONLY},
+            },
+            .used_images = {
+                {task_swapchain_image, daxa::TaskImageAccess::COLOR_ATTACHMENT, daxa::ImageMipArraySlice{}},
+            },
+            .task = [this](daxa::TaskRuntime runtime)
+            {
+                auto cmd_list = runtime.get_command_list();
+                cmd_list.begin_renderpass({
+                    .color_attachments = {{.image_view = swapchain_image.default_view(), .load_op = daxa::AttachmentLoadOp::CLEAR, .clear_value = std::array<f32, 4>{0.1f, 0.0f, 0.5f, 1.0f}}},
+                    .render_area = {.x = 0, .y = 0, .width = size_x, .height = size_y},
+                });
+                cmd_list.set_pipeline(use_geom ? geom_raster_pipeline : vert_raster_pipeline);
+                cmd_list.push_constant(DrawPush{
+                    .face_buffer = this->device.buffer_reference(vertex_buffer),
+                });
+                cmd_list.draw({.vertex_count = use_geom ? MAX_VERTS : (MAX_VERTS * 6u)});
+                cmd_list.end_renderpass();
+            },
+            .debug_name = APPNAME_PREFIX("Draw to swapchain"),
+        });
     }
 };
 

@@ -90,6 +90,7 @@ namespace daxa
     {
         PolygonMode polygon_mode = PolygonMode::FILL;
         FaceCullFlags face_culling = FaceCullFlagBits::NONE;
+        bool topology = false;
         bool depth_clamp_enable = false;
         bool rasterizer_discard_enable = false;
         bool depth_bias_enable = false;
@@ -108,6 +109,7 @@ namespace daxa
     struct RasterPipelineInfo
     {
         ShaderInfo vertex_shader_info = {};
+        ShaderInfo geometry_shader_info = {};
         ShaderInfo fragment_shader_info = {};
         std::vector<RenderAttachment> color_attachments = {};
         DepthTestInfo depth_test = {};

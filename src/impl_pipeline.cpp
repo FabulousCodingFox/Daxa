@@ -332,6 +332,7 @@ namespace daxa
         auto & impl = *as<ImplPipelineCompiler>();
         auto modified_info = info;
         modified_info.vertex_shader_info.compile_options.inherit(impl.info.shader_compile_options);
+        modified_info.geometry_shader_info.compile_options.inherit(impl.info.shader_compile_options);
         modified_info.fragment_shader_info.compile_options.inherit(impl.info.shader_compile_options);
 
         if (modified_info.push_constant_size > MAX_PUSH_CONSTANT_BYTE_SIZE)
@@ -430,6 +431,14 @@ namespace daxa
         }
 
         {
+            auto result = create_shader_module(modified_info.geometry_shader_info, VkShaderStageFlagBits::VK_SHADER_STAGE_GEOMETRY_BIT);
+            if (result.is_err())
+            {
+                return Result<RasterPipeline>(result.message());
+            }
+        }
+
+        {
             auto result = create_shader_module(modified_info.fragment_shader_info, VkShaderStageFlagBits::VK_SHADER_STAGE_FRAGMENT_BIT);
             if (result.is_err())
             {
@@ -448,11 +457,11 @@ namespace daxa
             .vertexAttributeDescriptionCount = 0,
             .pVertexAttributeDescriptions = nullptr,
         };
-        constexpr VkPipelineInputAssemblyStateCreateInfo vk_input_assembly_state{
+        VkPipelineInputAssemblyStateCreateInfo vk_input_assembly_state{
             .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
             .pNext = nullptr,
             .flags = {},
-            .topology = VkPrimitiveTopology::VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+            .topology = static_cast<VkPrimitiveTopology>(modified_info.raster.topology ? VkPrimitiveTopology::VK_PRIMITIVE_TOPOLOGY_POINT_LIST : VkPrimitiveTopology::VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST),
             .primitiveRestartEnable = {},
         };
         constexpr VkPipelineMultisampleStateCreateInfo vk_multisample_state{
