@@ -71,7 +71,6 @@ find_package(Vulkan REQUIRED)
 if(DAXA_ENABLE_GLSLANG)
     find_package(glslang CONFIG REQUIRED)
     find_package(Threads REQUIRED)
-
     target_compile_definitions(daxa
         PUBLIC
         DAXA_BUILT_WITH_GLSLANG=true
