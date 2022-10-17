@@ -68,6 +68,8 @@ namespace daxa
 
     struct ComputePipeline : ManagedPtr
     {
+        ComputePipeline() = default;
+
         auto info() const -> ComputePipelineInfo const &;
 
       private:
@@ -120,6 +122,8 @@ namespace daxa
 
     struct RasterPipeline : ManagedPtr
     {
+        RasterPipeline();
+
         auto info() const -> RasterPipelineInfo const &;
 
       private:
@@ -136,6 +140,8 @@ namespace daxa
 
     struct PipelineCompiler : ManagedPtr
     {
+        PipelineCompiler() = default;
+
         auto create_raster_pipeline(RasterPipelineInfo const & info) -> Result<RasterPipeline>;
         auto recreate_raster_pipeline(RasterPipeline const & pipeline) -> Result<RasterPipeline>;
         auto create_compute_pipeline(ComputePipelineInfo const & info) -> Result<ComputePipeline>;
