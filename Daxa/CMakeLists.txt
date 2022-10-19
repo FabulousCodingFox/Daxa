@@ -18,7 +18,7 @@ find_package(Vulkan REQUIRED)
 find_package(glm CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
-find_path(STB_INCLUDE_DIRS "stb.h")
+find_path(STB_INCLUDE_DIRS "stb_image.h")
 find_path(CGLTF_INCLUDE_DIRS "cgltf.h")
 
 set(NSIGHT_AFTERMATH_DIR "C:/dev/downloads/NVIDIA_Nsight_Aftermath_SDK_2022.1.0.22080")
@@ -38,7 +38,7 @@ else()
 endif()
 
 target_link_libraries(Daxa PUBLIC
-	HLSL SPIRV glslang OGLCompiler
+    glslang::HLSL glslang::SPIRV glslang::glslang glslang::OGLCompiler
 	unofficial::vulkan-memory-allocator::vulkan-memory-allocator
 	Vulkan::Vulkan
 	glm::glm
