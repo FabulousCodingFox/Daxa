@@ -16,15 +16,15 @@ uint get_lod(StructuredBuffer<Globals> globals, in float3 p) {
         return 0;
     if (x_load_presence<2>(globals, p))
         return 1;
-    if (x_load_presence<4>(globals, p))
-        return 2;
-    if (x_load_presence<8>(globals, p))
-        return 3;
-    if (x_load_presence<16>(globals, p))
-        return 4;
-    if (x_load_presence<32>(globals, p))
-        return 5;
-    return 6;
+    // if (x_load_presence<4>(globals, p))
+    //     return 2;
+    // if (x_load_presence<8>(globals, p))
+    //     return 3;
+    // if (x_load_presence<16>(globals, p))
+    //     return 4;
+    // if (x_load_presence<32>(globals, p))
+    //     return 5;
+    return 2;
 }
 
 void run_dda_main(StructuredBuffer<Globals> globals, in Ray ray, in out DDA_RunState run_state, in float3 b_min, in float3 b_max, in uint max_steps) {
