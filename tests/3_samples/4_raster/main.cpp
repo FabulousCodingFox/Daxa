@@ -369,7 +369,7 @@ struct RenderableVoxelWorld
         });
 
         auto image_info = device.info_image(atlas_texture_array);
-        std::array<i32, 3> mip_size = {static_cast<i32>(image_info.size[0]), static_cast<i32>(image_info.size[1]), static_cast<i32>(image_info.size[2])};
+        std::array<i32, 3> mip_size = {static_cast<i32>(image_info.size.x), static_cast<i32>(image_info.size.y), static_cast<i32>(image_info.size.z)};
         for (u32 i = 0; i < image_info.mip_level_count - 1; ++i)
         {
             std::array<i32, 3> next_mip_size = {std::max<i32>(1, mip_size[0] / 2), std::max<i32>(1, mip_size[1] / 2), std::max<i32>(1, mip_size[2] / 2)};
@@ -479,7 +479,9 @@ struct App : BaseApp<App>
         player.camera.set_rot(player.rot.x, player.rot.y);
         player.update(delta_time);
 
+        loop_task_list.remove_runtime_image(task_swapchain_image, swapchain_image);
         swapchain_image = swapchain.acquire_next_image();
+        loop_task_list.add_runtime_image(task_swapchain_image, swapchain_image);
         if (swapchain_image.is_empty())
             return;
         loop_task_list.execute();
@@ -517,8 +519,8 @@ struct App : BaseApp<App>
         if (!minimized)
         {
             swapchain.resize();
-            size_x = swapchain.info().width;
-            size_y = swapchain.info().height;
+            size_x = swapchain.get_surface_extent().x;
+            size_y = swapchain.get_surface_extent().y;
             device.destroy_image(depth_image);
             depth_image = device.create_image({
                 .format = daxa::Format::D24_UNORM_S8_UINT,
@@ -633,7 +635,7 @@ struct App : BaseApp<App>
                         cmd_list.push_constant(DrawPush{
                             .vp_mat = *reinterpret_cast<f32mat4x4 *>(&mat),
                             .chunk_pos = chunk.chunk->pos,
-                            .face_buffer = this->device.buffer_reference(chunk.face_buffer),
+                            .face_buffer = this->device.get_device_address(chunk.face_buffer),
                             .atlas_texture = this->renderable_world.atlas_texture_array.default_view(),
                             .atlas_sampler = this->renderable_world.atlas_sampler,
                         });

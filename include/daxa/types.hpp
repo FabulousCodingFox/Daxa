@@ -34,6 +34,8 @@ namespace daxa
         using f32 = float;
         using f64 = double;
 
+        using BufferDeviceAddress = u64;
+
         namespace detail
         {
             template <typename T, usize N>
@@ -672,6 +674,14 @@ namespace daxa
         i32 z = {};
 
         friend auto operator<=>(Offset3D const &, Offset3D const &) = default;
+    };
+
+    struct Extent2D
+    {
+        u32 x = {};
+        u32 y = {};
+
+        friend auto operator<=>(Extent2D const &, Extent2D const &) = default;
     };
 
     struct Extent3D

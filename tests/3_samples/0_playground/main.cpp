@@ -282,7 +282,7 @@ struct App : AppWindow<App>
         });
         cmd_list.set_pipeline(raster_pipeline);
         cmd_list.push_constant(DrawPush{
-            .face_buffer = this->device.buffer_reference(vertex_buffer),
+            .face_buffer = this->device.get_device_address(vertex_buffer),
         });
         cmd_list.draw({.vertex_count = vert_n});
         cmd_list.end_renderpass();
@@ -321,8 +321,8 @@ struct App : AppWindow<App>
         if (!minimized)
         {
             swapchain.resize();
-            size_x = swapchain.info().width;
-            size_y = swapchain.info().height;
+            size_x = swapchain.get_surface_extent().x;
+            size_y = swapchain.get_surface_extent().y;
             draw();
         }
     }

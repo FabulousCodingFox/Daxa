@@ -259,10 +259,10 @@ namespace daxa
         return impl.slot(id).info;
     }
 
-    auto Device::buffer_reference(BufferId id) const -> u64
+    auto Device::get_device_address(BufferId id) const -> BufferDeviceAddress
     {
         auto const & impl = *as<ImplDevice>();
-        return static_cast<u64>(impl.slot(id).device_address);
+        return BufferDeviceAddress{ static_cast<u64>(impl.slot(id).device_address) };
     }
 
     auto Device::info_image(ImageId id) const -> ImageInfo
@@ -350,7 +350,7 @@ namespace daxa
             .sampleRateShading = VK_FALSE,
             .dualSrcBlend = VK_FALSE,
             .logicOp = VK_FALSE,
-            .multiDrawIndirect = VK_FALSE,
+            .multiDrawIndirect = VK_TRUE,   // Very usefull for gpu driven rendering
             .drawIndirectFirstInstance = VK_FALSE,
             .depthClamp = VK_FALSE,
             .depthBiasClamp = VK_FALSE,
@@ -360,28 +360,28 @@ namespace daxa
             .largePoints = VK_FALSE,
             .alphaToOne = VK_FALSE,
             .multiViewport = VK_FALSE,
-            .samplerAnisotropy = VK_TRUE,
+            .samplerAnisotropy = VK_TRUE,   // Allows for anisotropic filtering.
             .textureCompressionETC2 = VK_FALSE,
             .textureCompressionASTC_LDR = VK_FALSE,
             .textureCompressionBC = VK_FALSE,
             .occlusionQueryPrecise = VK_FALSE,
             .pipelineStatisticsQuery = VK_FALSE,
             .vertexPipelineStoresAndAtomics = VK_FALSE,
-            .fragmentStoresAndAtomics = VK_FALSE,
+            .fragmentStoresAndAtomics = VK_TRUE,
             .shaderTessellationAndGeometryPointSize = VK_FALSE,
             .shaderImageGatherExtended = VK_FALSE,
             .shaderStorageImageExtendedFormats = VK_FALSE,
             .shaderStorageImageMultisample = VK_FALSE,
             .shaderStorageImageReadWithoutFormat = VK_FALSE,
             .shaderStorageImageWriteWithoutFormat = VK_FALSE,
-            .shaderUniformBufferArrayDynamicIndexing = VK_FALSE,
-            .shaderSampledImageArrayDynamicIndexing = VK_FALSE,
-            .shaderStorageBufferArrayDynamicIndexing = VK_FALSE,
-            .shaderStorageImageArrayDynamicIndexing = VK_FALSE,
+            .shaderUniformBufferArrayDynamicIndexing = VK_FALSE,    // This is superseded by descriptor indexing.
+            .shaderSampledImageArrayDynamicIndexing = VK_FALSE,     // This is superseded by descriptor indexing.
+            .shaderStorageBufferArrayDynamicIndexing = VK_FALSE,    // This is superseded by descriptor indexing.
+            .shaderStorageImageArrayDynamicIndexing = VK_FALSE,     // This is superseded by descriptor indexing.
             .shaderClipDistance = VK_FALSE,
             .shaderCullDistance = VK_FALSE,
             .shaderFloat64 = VK_FALSE,
-            .shaderInt64 = VK_TRUE,
+            .shaderInt64 = VK_TRUE,     // Used for buffer device address math.
             .shaderInt16 = VK_FALSE,
             .shaderResourceResidency = VK_FALSE,
             .shaderResourceMinLod = VK_FALSE,
@@ -409,26 +409,26 @@ namespace daxa
         VkPhysicalDeviceDescriptorIndexingFeatures REQUIRED_PHYSICAL_DEVICE_FEATURES_DESCRIPTOR_INDEXING{
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES,
             .pNext = reinterpret_cast<void *>(&REQUIRED_PHYSICAL_DEVICE_FEATURES_BUFFER_DEVICE_ADDRESS),
-            .shaderInputAttachmentArrayDynamicIndexing = VK_FALSE, // no render passes
-            .shaderUniformTexelBufferArrayDynamicIndexing = VK_TRUE,
-            .shaderStorageTexelBufferArrayDynamicIndexing = VK_TRUE,
-            .shaderUniformBufferArrayNonUniformIndexing = VK_TRUE,
-            .shaderSampledImageArrayNonUniformIndexing = VK_TRUE,
-            .shaderStorageBufferArrayNonUniformIndexing = VK_TRUE,
-            .shaderStorageImageArrayNonUniformIndexing = VK_TRUE,
-            .shaderInputAttachmentArrayNonUniformIndexing = VK_FALSE, // no render passes
-            .shaderUniformTexelBufferArrayNonUniformIndexing = VK_TRUE,
-            .shaderStorageTexelBufferArrayNonUniformIndexing = VK_TRUE,
-            .descriptorBindingUniformBufferUpdateAfterBind = VK_FALSE, // no uniform buffers
-            .descriptorBindingSampledImageUpdateAfterBind = VK_TRUE,
-            .descriptorBindingStorageImageUpdateAfterBind = VK_TRUE,
-            .descriptorBindingStorageBufferUpdateAfterBind = VK_TRUE,
-            .descriptorBindingUniformTexelBufferUpdateAfterBind = VK_FALSE, // no uniform buffers
-            .descriptorBindingStorageTexelBufferUpdateAfterBind = VK_TRUE,
-            .descriptorBindingUpdateUnusedWhilePending = VK_TRUE,
-            .descriptorBindingPartiallyBound = VK_TRUE,
-            .descriptorBindingVariableDescriptorCount = VK_TRUE,
-            .runtimeDescriptorArray = VK_TRUE,
+            .shaderInputAttachmentArrayDynamicIndexing = VK_FALSE,
+            .shaderUniformTexelBufferArrayDynamicIndexing = VK_FALSE,
+            .shaderStorageTexelBufferArrayDynamicIndexing = VK_FALSE,
+            .shaderUniformBufferArrayNonUniformIndexing = VK_FALSE,
+            .shaderSampledImageArrayNonUniformIndexing = VK_TRUE,   // Needed for bindless sampled images.
+            .shaderStorageBufferArrayNonUniformIndexing = VK_TRUE,  // Needed for bindless buffers.
+            .shaderStorageImageArrayNonUniformIndexing = VK_TRUE,   // Needed for bindless storage images.
+            .shaderInputAttachmentArrayNonUniformIndexing = VK_FALSE,
+            .shaderUniformTexelBufferArrayNonUniformIndexing = VK_FALSE,
+            .shaderStorageTexelBufferArrayNonUniformIndexing = VK_FALSE,
+            .descriptorBindingUniformBufferUpdateAfterBind = VK_FALSE,
+            .descriptorBindingSampledImageUpdateAfterBind = VK_TRUE,    // Needed for bindless sampled images.
+            .descriptorBindingStorageImageUpdateAfterBind = VK_TRUE,    // Needed for bindless storage images.
+            .descriptorBindingStorageBufferUpdateAfterBind = VK_TRUE,   // Needed for bindless buffers.
+            .descriptorBindingUniformTexelBufferUpdateAfterBind = VK_FALSE,
+            .descriptorBindingStorageTexelBufferUpdateAfterBind = VK_FALSE,
+            .descriptorBindingUpdateUnusedWhilePending = VK_TRUE,   // Needed for bindless table updates.
+            .descriptorBindingPartiallyBound = VK_TRUE,     // Needed for sparse binding in bindless table.
+            .descriptorBindingVariableDescriptorCount = VK_FALSE,
+            .runtimeDescriptorArray = VK_TRUE,  // Allows shaders to not have a hardcoded descriptor maximum per talbe.
         };
 
         VkPhysicalDeviceHostQueryResetFeatures REQUIRED_PHYSICAL_DEVICE_FEATURES_HOST_QUERY_RESET{
@@ -466,7 +466,7 @@ namespace daxa
         VkPhysicalDeviceScalarBlockLayoutFeatures REQUIRED_PHYSICAL_DEVICE_FEATURES_SCALAR_LAYOUT{
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES,
             .pNext = reinterpret_cast<void *>(&REQUIRED_PHYSICAL_DEVICE_FEATURES_ROBUSTNESS_2),
-            .scalarBlockLayout = this->info.use_scalar_layout ? VK_TRUE : VK_FALSE,
+            .scalarBlockLayout = VK_TRUE,
         };
 
         void * REQUIRED_DEVICE_FEATURE_P_CHAIN = reinterpret_cast<void *>(&REQUIRED_PHYSICAL_DEVICE_FEATURES_SCALAR_LAYOUT);
@@ -975,7 +975,7 @@ namespace daxa
 
         VkImageCreateFlags vk_image_create_flags = {};
 
-        if (image_info.dimensions == 2 && image_info.size[0] == image_info.size[1] && image_info.array_layer_count % 6 == 0)
+        if (image_info.dimensions == 2 && image_info.size.x == image_info.size.y && image_info.array_layer_count % 6 == 0)
         {
             vk_image_create_flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
         }

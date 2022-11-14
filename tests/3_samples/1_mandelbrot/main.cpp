@@ -85,8 +85,8 @@ struct App : BaseApp<App>
         if (!minimized)
         {
             swapchain.resize();
-            size_x = swapchain.info().width;
-            size_y = swapchain.info().height;
+            size_x = swapchain.get_surface_extent().x;
+            size_y = swapchain.get_surface_extent().y;
             device.destroy_image(render_image);
             loop_task_list.remove_runtime_image(task_render_image, render_image);
             render_image = device.create_image({
@@ -154,7 +154,7 @@ struct App : BaseApp<App>
                 cmd_list.push_constant(ComputePush {
                     .image_id = render_image.default_view(),
 #if DAXA_SHADERLANG == DAXA_SHADERLANG_GLSL
-                    .gpu_input = this->device.buffer_reference(gpu_input_buffer),
+                    .gpu_input = this->device.get_device_address(gpu_input_buffer),
 #elif DAXA_SHADERLANG == DAXA_SHADERLANG_HLSL
                     .input_buffer_id = gpu_input_buffer,
 #endif

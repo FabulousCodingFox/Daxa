@@ -162,8 +162,8 @@ struct App : AppWindow<App>
         cmd_list.set_pipeline(update_boids_pipeline);
 
         cmd_list.push_constant(UpdateBoidsPushConstant{
-            .boids_buffer = device.buffer_reference(boid_buffer_id),
-            .old_boids_buffer = device.buffer_reference(old_boid_buffer_id),
+            .boids_buffer = device.get_device_address(boid_buffer_id),
+            .old_boids_buffer = device.get_device_address(old_boid_buffer_id),
         });
 
         cmd_list.dispatch((MAX_BOIDS + 63) / 64, 1, 1);
@@ -188,7 +188,7 @@ struct App : AppWindow<App>
         });
 
         cmd_list.push_constant(DrawPushConstant{
-            .boids_buffer = device.buffer_reference(boid_buffer_id),
+            .boids_buffer = device.get_device_address(boid_buffer_id),
             .axis_scaling = {
                 std::min(1.0f, static_cast<f32>(sy) / static_cast<f32>(sx)),
                 std::min(1.0f, static_cast<f32>(sx) / static_cast<f32>(sy)),
@@ -297,8 +297,8 @@ struct App : AppWindow<App>
         if (!minimized)
         {
             swapchain.resize();
-            size_x = swapchain.info().width;
-            size_y = swapchain.info().height;
+            size_x = swapchain.get_surface_extent().x;
+            size_y = swapchain.get_surface_extent().y;
             aspect = static_cast<f32>(size_x) / static_cast<f32>(size_y);
             draw();
         }

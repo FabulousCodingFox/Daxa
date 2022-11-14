@@ -52,7 +52,9 @@ struct App : BaseApp<App>
         reload_pipeline(raster_pipeline);
         ui_update();
 
+        loop_task_list.remove_runtime_image(task_swapchain_image, swapchain_image);
         swapchain_image = swapchain.acquire_next_image();
+        loop_task_list.add_runtime_image(task_swapchain_image, swapchain_image);
         if (swapchain_image.is_empty())
             return;
         loop_task_list.execute();
@@ -67,8 +69,8 @@ struct App : BaseApp<App>
         if (!minimized)
         {
             swapchain.resize();
-            size_x = swapchain.info().width;
-            size_y = swapchain.info().height;
+            size_x = swapchain.get_surface_extent().x;
+            size_y = swapchain.get_surface_extent().y;
             base_on_update();
         }
     }
@@ -121,7 +123,7 @@ struct App : BaseApp<App>
                 cmd_list.set_pipeline(raster_pipeline);
                 cmd_list.push_constant(DrawPush {
 #if DAXA_SHADERLANG == DAXA_SHADERLANG_GLSL
-                    .face_buffer = this->device.buffer_reference(vertex_buffer),
+                    .face_buffer = this->device.get_device_address(vertex_buffer),
 #elif DAXA_SHADERLANG == DAXA_SHADERLANG_HLSL
                     .vertex_buffer_id = vertex_buffer,
 #endif

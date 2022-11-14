@@ -161,7 +161,6 @@ namespace daxa
     struct DeviceInfo
     {
         std::function<i32(DeviceProperties const &)> selector = default_device_score;
-        bool use_scalar_layout = true;
         std::string debug_name = {};
     };
 
@@ -197,7 +196,7 @@ namespace daxa
         void destroy_sampler(SamplerId id);
 
         auto info_buffer(BufferId id) const -> BufferInfo;
-        auto buffer_reference(BufferId id) const -> u64;
+        auto get_device_address(BufferId id) const -> BufferDeviceAddress;
         auto info_image(ImageId id) const -> ImageInfo;
         auto info_image_view(ImageViewId id) const -> ImageViewInfo;
         auto info_sampler(SamplerId id) const -> SamplerInfo;
