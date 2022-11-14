@@ -19,7 +19,7 @@ $2
 
 #include <daxa-c/types.h>
 #include <daxa-c/core.h>
-// #include <daxa-c/gpu_resources.h>
+#include <daxa-c/gpu_resources.h>
 // #include <daxa-c/pipeline.h>
 // #include <daxa-c/semaphore.h>
 // #include <daxa-c/swapchain.h>
