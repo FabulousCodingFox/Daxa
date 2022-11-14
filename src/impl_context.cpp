@@ -2,6 +2,8 @@
 #include "impl_context.hpp"
 #include "impl_device.hpp"
 
+#include <daxa-c/context.h>
+
 #include <chrono>
 #include <utility>
 
@@ -40,7 +42,8 @@ namespace daxa
         {
             VkPhysicalDeviceProperties vk_device_properties;
             vkGetPhysicalDeviceProperties(physical_device, &vk_device_properties);
-            if (vk_device_properties.apiVersion < VK_API_VERSION_1_3) {
+            if (vk_device_properties.apiVersion < VK_API_VERSION_1_3)
+            {
                 // NOTE: Found device with incompatible API version. Skipping this device...
                 return 0;
             }
@@ -168,3 +171,66 @@ namespace daxa
         vkDestroyInstance(vk_instance, nullptr);
     }
 } // namespace daxa
+
+DAXA_EXTERN_C void daxa_default_validation_callback(daxa_MsgSeverity severity, daxa_MsgType type, char const * msg)
+{
+    daxa::default_validation_callback(static_cast<daxa::MsgSeverity>(severity), static_cast<daxa::MsgType>(type), msg);
+}
+DAXA_EXTERN_C daxa_Context * daxa_create_context(daxa_ContextInfo const * info)
+{
+    return new daxa::ImplContext({
+        .enable_validation = static_cast<bool>(info->enable_validation),
+        .validation_callback =
+            [info](daxa::MsgSeverity severity, daxa::MsgType type, std::string_view msg)
+        {
+            info->validation_callback ? info->validation_callback(static_cast<daxa_MsgSeverity>(severity), static_cast<daxa_MsgType>(type), msg.data())
+                                      : daxa::default_validation_callback(severity, type, msg);
+        },
+    });
+}
+DAXA_EXTERN_C void daxa_destroy_context(daxa_Context * self)
+{
+    delete self;
+}
+DAXA_EXTERN_C daxa_Device * daxa_context_create_device(daxa_Context * self, daxa_DeviceInfo const * device_info)
+{
+    using namespace daxa;
+    auto & impl = *reinterpret_cast<daxa::ImplContext *>(self);
+
+    u32 physical_device_n = 0;
+    vkEnumeratePhysicalDevices(impl.vk_instance, &physical_device_n, nullptr);
+    std::vector<VkPhysicalDevice> physical_devices;
+    physical_devices.resize(physical_device_n);
+    vkEnumeratePhysicalDevices(impl.vk_instance, &physical_device_n, physical_devices.data());
+
+    auto device_score = [&](VkPhysicalDevice physical_device) -> i32
+    {
+        VkPhysicalDeviceProperties vk_device_properties;
+        vkGetPhysicalDeviceProperties(physical_device, &vk_device_properties);
+        if (vk_device_properties.apiVersion < VK_API_VERSION_1_3)
+        {
+            // NOTE: Found device with incompatible API version. Skipping this device...
+            return 0;
+        }
+        return device_info->selector(reinterpret_cast<daxa_DeviceProperties *>(&vk_device_properties));
+    };
+
+    auto device_comparator = [&](auto const & a, auto const & b) -> bool
+    {
+        return device_score(a) < device_score(b);
+    };
+    auto best_physical_device = std::max_element(physical_devices.begin(), physical_devices.end(), device_comparator);
+
+    DAXA_DBG_ASSERT_TRUE_M(device_score(*best_physical_device) != -1, "no suitable device found");
+
+    // TODO: check for every possible device if it has the required features and if not dont even consider them.
+
+    VkPhysicalDevice physical_device = *best_physical_device;
+
+    VkPhysicalDeviceProperties vk_device_properties;
+    vkGetPhysicalDeviceProperties(physical_device, &vk_device_properties);
+    auto device_vulkan_info = *reinterpret_cast<DeviceProperties *>(&vk_device_properties);
+
+    // return new ImplDevice(daxa::DeviceInfo{}, device_vulkan_info, reinterpret_cast<daxa::ImplContext *>(self), physical_device);
+    return NULL;
+}
