@@ -294,7 +294,7 @@ namespace tests
                 .debug_name = APPNAME_PREFIX("pipeline_manager (drawing)"),
             });
             // clang-format off
-            daxa::RasterPipelineId raster_pipeline = pipeline_manager.add_raster_pipeline({
+            daxa::RasterPipeline raster_pipeline = pipeline_manager.add_raster_pipeline({
                 .vertex_shader_info = {.source = daxa::ShaderFile{"vert.hlsl"}},
                 .fragment_shader_info = {.source = daxa::ShaderFile{"frag.hlsl"}},
                 .color_attachments = {{.format = swapchain.get_format()}},
@@ -347,7 +347,7 @@ namespace tests
                             .color_attachments = {{.image_view = render_image.default_view()}},
                             .render_area = {.x = 0, .y = 0, .width = size_x, .height = size_y},
                         });
-                        cmd_list.set_pipeline(pipeline_manager.get_pipeline(raster_pipeline));
+                        cmd_list.set_pipeline(raster_pipeline);
                         cmd_list.draw({.vertex_count = 3});
                         cmd_list.end_renderpass();
                     },

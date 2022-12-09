@@ -43,5 +43,5 @@ auto main() -> int
 
     std::cout << "Success!" << std::endl;
 
-    daxa::ComputePipelineId const compute_pipeline = compilation_result.value();
+    daxa::ComputePipeline const compute_pipeline = compilation_result.value();
 }

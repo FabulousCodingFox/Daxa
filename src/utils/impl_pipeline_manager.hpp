@@ -84,11 +84,9 @@ namespace daxa
 
         auto create_compute_pipeline(ComputePipelineCompileInfo const & a_info) -> Result<ComputePipelineState>;
         auto create_raster_pipeline(RasterPipelineCompileInfo const & a_info) -> Result<RasterPipelineState>;
-        auto add_compute_pipeline(ComputePipelineCompileInfo const & a_info) -> Result<ComputePipelineId>;
-        auto add_raster_pipeline(RasterPipelineCompileInfo const & a_info) -> Result<RasterPipelineId>;
+        auto add_compute_pipeline(ComputePipelineCompileInfo const & a_info) -> Result<ComputePipeline>;
+        auto add_raster_pipeline(RasterPipelineCompileInfo const & a_info) -> Result<RasterPipeline>;
         auto reload_all() -> Result<bool>;
-        auto get_pipeline(ComputePipelineId id) -> ComputePipeline const &;
-        auto get_pipeline(RasterPipelineId id) -> RasterPipeline const &;
 
         auto get_spirv(ShaderCompileInfo const & shader_info, ShaderStage shader_stage) -> Result<std::vector<u32>>;
         auto full_path_to_file(std::filesystem::path const & path) -> Result<std::filesystem::path>;

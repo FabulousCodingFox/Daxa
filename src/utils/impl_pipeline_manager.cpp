@@ -338,13 +338,13 @@ namespace daxa
 
     PipelineManager::PipelineManager(PipelineManagerInfo info) : ManagedPtr(new ImplPipelineManager{std::move(info)}) {}
 
-    auto PipelineManager::add_compute_pipeline(ComputePipelineCompileInfo const & info) -> Result<ComputePipelineId>
+    auto PipelineManager::add_compute_pipeline(ComputePipelineCompileInfo const & info) -> Result<ComputePipeline>
     {
         auto & impl = *reinterpret_cast<ImplPipelineManager *>(this->object);
         return impl.add_compute_pipeline(info);
     }
 
-    auto PipelineManager::add_raster_pipeline(RasterPipelineCompileInfo const & info) -> Result<RasterPipelineId>
+    auto PipelineManager::add_raster_pipeline(RasterPipelineCompileInfo const & info) -> Result<RasterPipeline>
     {
         auto & impl = *reinterpret_cast<ImplPipelineManager *>(this->object);
         return impl.add_raster_pipeline(info);
@@ -354,17 +354,6 @@ namespace daxa
     {
         auto & impl = *reinterpret_cast<ImplPipelineManager *>(this->object);
         return impl.reload_all();
-    }
-
-    auto PipelineManager::get_pipeline(ComputePipelineId id) -> ComputePipeline const &
-    {
-        auto & impl = *reinterpret_cast<ImplPipelineManager *>(this->object);
-        return impl.compute_pipelines[id.index].pipeline;
-    }
-    auto PipelineManager::get_pipeline(RasterPipelineId id) -> RasterPipeline const &
-    {
-        auto & impl = *reinterpret_cast<ImplPipelineManager *>(this->object);
-        return impl.raster_pipelines[id.index].pipeline;
     }
 
     ImplPipelineManager::ImplPipelineManager(PipelineManagerInfo && a_info)
@@ -498,28 +487,26 @@ namespace daxa
         return Result<RasterPipelineState>(std::move(pipe_result));
     }
 
-    auto ImplPipelineManager::add_compute_pipeline(ComputePipelineCompileInfo const & a_info) -> Result<ComputePipelineId>
+    auto ImplPipelineManager::add_compute_pipeline(ComputePipelineCompileInfo const & a_info) -> Result<ComputePipeline>
     {
         auto pipe_result = create_compute_pipeline(a_info);
         if (pipe_result.is_err())
         {
-            return Result<ComputePipelineId>(pipe_result.m);
+            return Result<ComputePipeline>(pipe_result.m);
         }
-        auto result = ComputePipelineId{{.index = static_cast<u32>(this->compute_pipelines.size())}};
         this->compute_pipelines.push_back(std::move(pipe_result.value()));
-        return Result<ComputePipelineId>{result};
+        return Result<ComputePipeline>(pipe_result.value().pipeline);
     }
 
-    auto ImplPipelineManager::add_raster_pipeline(RasterPipelineCompileInfo const & a_info) -> Result<RasterPipelineId>
+    auto ImplPipelineManager::add_raster_pipeline(RasterPipelineCompileInfo const & a_info) -> Result<RasterPipeline>
     {
         auto pipe_result = create_raster_pipeline(a_info);
         if (pipe_result.is_err())
         {
-            return Result<RasterPipelineId>(pipe_result.m);
+            return Result<RasterPipeline>(pipe_result.m);
         }
-        auto result = RasterPipelineId{{.index = static_cast<u32>(this->raster_pipelines.size())}};
         this->raster_pipelines.push_back(std::move(pipe_result.value()));
-        return Result<RasterPipelineId>{result};
+        return Result<RasterPipeline>(pipe_result.value().pipeline);
     }
 
     auto ImplPipelineManager::reload_all() -> Result<bool>
@@ -600,15 +587,6 @@ namespace daxa
         }
 
         return Result<bool>(reloaded);
-    }
-
-    auto ImplPipelineManager::get_pipeline(ComputePipelineId id) -> ComputePipeline const &
-    {
-        return compute_pipelines[id.index].pipeline;
-    }
-    auto ImplPipelineManager::get_pipeline(RasterPipelineId id) -> RasterPipeline const &
-    {
-        return raster_pipelines[id.index].pipeline;
     }
 
     auto ImplPipelineManager::get_spirv(ShaderCompileInfo const & shader_info, ShaderStage shader_stage) -> Result<std::vector<u32>>

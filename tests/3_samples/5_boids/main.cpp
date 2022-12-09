@@ -44,7 +44,7 @@ struct App : AppWindow<App>
         .debug_name = APPNAME_PREFIX("pipeline_manager"),
     });
     // clang-format off
-    daxa::RasterPipelineId draw_pipeline = pipeline_manager.add_raster_pipeline({
+    daxa::RasterPipeline draw_pipeline = pipeline_manager.add_raster_pipeline({
         .vertex_shader_info = {.source = daxa::ShaderFile{"vert.glsl"}},
         .fragment_shader_info = {.source = daxa::ShaderFile{"frag.glsl"}},
         .color_attachments = {{.format = swapchain.get_format()}},
@@ -52,7 +52,7 @@ struct App : AppWindow<App>
         .push_constant_size = sizeof(DrawPushConstant),
         .debug_name = APPNAME_PREFIX("draw_pipeline"),
     }).value();
-    daxa::ComputePipelineId update_boids_pipeline = pipeline_manager.add_compute_pipeline({
+    daxa::ComputePipeline update_boids_pipeline = pipeline_manager.add_compute_pipeline({
         .shader_info = {.source = daxa::ShaderFile{"update_boids.glsl"}},
         .push_constant_size = sizeof(UpdateBoidsPushConstant),
         .debug_name = APPNAME_PREFIX("draw_pipeline"),
@@ -159,7 +159,7 @@ struct App : AppWindow<App>
 
     void update_boids(daxa::CommandList & cmd_list, daxa::BufferId boid_buffer_id, daxa::BufferId old_boid_buffer_id)
     {
-        cmd_list.set_pipeline(pipeline_manager.get_pipeline(update_boids_pipeline));
+        cmd_list.set_pipeline(update_boids_pipeline);
 
         cmd_list.push_constant(UpdateBoidsPushConstant{
             .boids_buffer = device.get_device_address(boid_buffer_id),
@@ -171,7 +171,7 @@ struct App : AppWindow<App>
 
     void draw_boids(daxa::CommandList & cmd_list, daxa::ImageId render_target, daxa::BufferId boid_buffer_id, u32 sx, u32 sy)
     {
-        cmd_list.set_pipeline(pipeline_manager.get_pipeline(draw_pipeline));
+        cmd_list.set_pipeline(draw_pipeline);
         cmd_list.begin_renderpass({
             .color_attachments = {
                 {

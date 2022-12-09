@@ -75,7 +75,7 @@ struct App : AppWindow<App>
     });
 
     // clang-format off
-    daxa::RasterPipelineId raster_pipeline = pipeline_manager.add_raster_pipeline({
+    daxa::RasterPipeline raster_pipeline = pipeline_manager.add_raster_pipeline({
         .vertex_shader_info = {.source = daxa::ShaderFile{"draw.hlsl"}, .compile_options = {.entry_point = "vs_main"}},
         .fragment_shader_info = {.source = daxa::ShaderFile{"draw.hlsl"}, .compile_options = {.entry_point = "fs_main"}},
         .color_attachments = {
@@ -423,7 +423,7 @@ struct App : AppWindow<App>
                     }},
                     .render_area = {.x = 0, .y = 0, .width = render_size_x, .height = render_size_y},
                 });
-                cmd_list.set_pipeline(pipeline_manager.get_pipeline(raster_pipeline));
+                cmd_list.set_pipeline(raster_pipeline);
                 auto push = RasterPush{.input_buffer_id = raster_input_buffer};
                 renderable_world.draw(cmd_list, push);
                 cmd_list.end_renderpass();

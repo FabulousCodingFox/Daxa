@@ -61,7 +61,7 @@ struct App : AppWindow<App>
     // }
 
     // clang-format off
-    daxa::RasterPipelineId raster_pipeline = pipeline_manager.get_raster_pipeline({
+    daxa::RasterPipeline raster_pipeline = pipeline_manager.get_raster_pipeline({
         .vertex_shader_info = {.source = daxa::ShaderFile{"draw.glsl"}, .compile_options = {.defines = {daxa::ShaderDefine{"DRAW_VERT"}}}},
         .fragment_shader_info = {.source = daxa::ShaderFile{"draw.glsl"}, .compile_options = {.defines = {daxa::ShaderDefine{"DRAW_FRAG"}}}},
         .color_attachments = {{.format = swapchain.get_format()}},
@@ -385,7 +385,7 @@ struct App : AppWindow<App>
             .color_attachments = {{.image_view = swapchain_image.default_view(), .load_op = daxa::AttachmentLoadOp::CLEAR, .clear_value = std::array<f32, 4>{0.1f, 0.0f, 0.5f, 1.0f}}},
             .render_area = {.x = 0, .y = 0, .width = size_x, .height = size_y},
         });
-        cmd_list.set_pipeline(pipeline_manager.get_pipeline(raster_pipeline));
+        cmd_list.set_pipeline(raster_pipeline);
 
         for (auto const & model : models)
         {

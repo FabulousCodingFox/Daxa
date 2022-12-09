@@ -85,33 +85,14 @@ namespace daxa
         std::string debug_name = {};
     };
 
-    struct PipelineId
-    {
-        u32 index = std::numeric_limits<u32>::max();
-
-        auto is_empty() const -> bool;
-
-        auto operator<=>(PipelineId const & other) const = default;
-    };
-
-    struct ComputePipelineId : public PipelineId
-    {
-    };
-
-    struct RasterPipelineId : public PipelineId
-    {
-    };
-
     struct PipelineManager : ManagedPtr
     {
         PipelineManager() = default;
 
         PipelineManager(PipelineManagerInfo info);
 
-        auto add_compute_pipeline(ComputePipelineCompileInfo const & info) -> Result<ComputePipelineId>;
-        auto add_raster_pipeline(RasterPipelineCompileInfo const & info) -> Result<RasterPipelineId>;
+        auto add_compute_pipeline(ComputePipelineCompileInfo const & info) -> Result<ComputePipeline>;
+        auto add_raster_pipeline(RasterPipelineCompileInfo const & info) -> Result<RasterPipeline>;
         auto reload_all() -> Result<bool>;
-        auto get_pipeline(ComputePipelineId id) -> ComputePipeline const &;
-        auto get_pipeline(RasterPipelineId id) -> RasterPipeline const &;
     };
 } // namespace daxa
