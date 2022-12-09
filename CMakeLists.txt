@@ -3,13 +3,13 @@ cmake_minimum_required(VERSION 3.21)
 include(cmake/warnings.cmake)
 
 if(DAXA_ENABLE_UTILS)
+    if(DAXA_ENABLE_DXC)
+        list(APPEND VCPKG_MANIFEST_FEATURES "dxc")
+    endif()
+    if(DAXA_ENABLE_GLSLANG)
+        list(APPEND VCPKG_MANIFEST_FEATURES "glslang")
+    endif()
     list(APPEND VCPKG_MANIFEST_FEATURES "utils")
-endif()
-if(DAXA_ENABLE_DXC)
-    list(APPEND VCPKG_MANIFEST_FEATURES "dxc")
-endif()
-if(DAXA_ENABLE_GLSLANG)
-    list(APPEND VCPKG_MANIFEST_FEATURES "glslang")
 endif()
 if(DAXA_ENABLE_TESTS)
     list(APPEND VCPKG_MANIFEST_FEATURES "tests")
@@ -71,43 +71,42 @@ target_compile_features(daxa PUBLIC cxx_std_20)
 find_package(unofficial-vulkan-memory-allocator CONFIG REQUIRED)
 find_package(Vulkan REQUIRED)
 
-if(DAXA_ENABLE_GLSLANG)
-    find_package(glslang CONFIG REQUIRED)
-    find_package(Threads REQUIRED)
-
-    target_compile_definitions(daxa
-        PUBLIC
-        DAXA_BUILT_WITH_GLSLANG=true
-    )
-    target_link_libraries(daxa
-        PUBLIC
-        glslang::glslang
-        glslang::SPIRV
-        glslang::HLSL
-    )
-endif()
-
 target_compile_definitions(daxa
     PUBLIC
     DAXA_SHADERLANG_GLSL=1
     DAXA_SHADERLANG_HLSL=2
 )
 
-if(DAXA_ENABLE_DXC)
-    find_package(dxc CONFIG REQUIRED)
-
-    target_compile_definitions(daxa
-        PUBLIC
-        DAXA_BUILT_WITH_DXC=true
-    )
-    target_link_libraries(daxa
-        PUBLIC
-        dxc::dxc
-    )
-endif()
-
-
 if(DAXA_ENABLE_UTILS)
+    if(DAXA_ENABLE_GLSLANG)
+        find_package(glslang CONFIG REQUIRED)
+        find_package(Threads REQUIRED)
+
+        target_compile_definitions(daxa
+            PUBLIC
+            DAXA_BUILT_WITH_GLSLANG=true
+        )
+        target_link_libraries(daxa
+            PUBLIC
+            glslang::glslang
+            glslang::SPIRV
+            glslang::HLSL
+        )
+    endif()
+
+    if(DAXA_ENABLE_DXC)
+        find_package(dxc CONFIG REQUIRED)
+
+        target_compile_definitions(daxa
+            PUBLIC
+            DAXA_BUILT_WITH_DXC=true
+        )
+        target_link_libraries(daxa
+            PUBLIC
+            dxc::dxc
+        )
+    endif()
+
     find_package(imgui CONFIG REQUIRED)
     find_package(fsr2 CONFIG REQUIRED)
     target_compile_definitions(daxa
@@ -178,20 +177,20 @@ find_package(unofficial-vulkan-memory-allocator CONFIG REQUIRED)
 find_package(Vulkan REQUIRED)
 ]=])
 
-if(DAXA_ENABLE_GLSLANG)
-    file(APPEND ${CMAKE_BINARY_DIR}/config.cmake.in [=[
+if(DAXA_ENABLE_UTILS)
+    if(DAXA_ENABLE_GLSLANG)
+        file(APPEND ${CMAKE_BINARY_DIR}/config.cmake.in [=[
 find_package(glslang CONFIG REQUIRED)
 find_package(Threads REQUIRED)
 ]=])
-endif()
+    endif()
 
-if(DAXA_ENABLE_DXC)
-    file(APPEND ${CMAKE_BINARY_DIR}/config.cmake.in [=[
+    if(DAXA_ENABLE_DXC)
+        file(APPEND ${CMAKE_BINARY_DIR}/config.cmake.in [=[
 find_package(dxc CONFIG REQUIRED)
 ]=])
-endif()
+    endif()
 
-if(DAXA_ENABLE_UTILS)
     file(APPEND ${CMAKE_BINARY_DIR}/config.cmake.in [=[
 find_package(imgui CONFIG REQUIRED)
 find_package(fsr2 CONFIG REQUIRED)
