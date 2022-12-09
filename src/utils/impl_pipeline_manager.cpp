@@ -402,6 +402,11 @@ namespace daxa
 
     ImplPipelineManager::~ImplPipelineManager()
     {
+#if DAXA_BUILT_WITH_GLSLANG
+        {
+            glslang::FinalizeProcess();
+        }
+#endif
     }
 
     auto ImplPipelineManager::create_compute_pipeline(ComputePipelineCompileInfo const & a_info) -> Result<ComputePipelineState>
@@ -621,6 +626,9 @@ namespace daxa
 
             Result<std::vector<u32>> ret = Result<std::vector<u32>>("No shader was compiled");
 
+            assert(shader_info.compile_options.language.has_value() && "How did this happen? You mustn't provide a nullopt for the language");
+
+            DAXA_DBG_ASSERT_TRUE_M(shader_info.compile_options.language.has_value(), "You must have a shader language set when compiling GLSL");
             switch (shader_info.compile_options.language.value())
             {
 #if DAXA_BUILT_WITH_GLSLANG
@@ -828,7 +836,9 @@ namespace daxa
         auto messages = static_cast<EShMessages>(EShMsgSpvRules | EShMsgVulkanRules);
         TBuiltInResource const resource = DAXA_DEFAULT_BUILTIN_RESOURCE;
 
-        if (!shader.parse(&resource, 450, false, messages, includer))
+        static constexpr int SHADER_VERSION = 450;
+
+        if (!shader.parse(&resource, SHADER_VERSION, false, messages, includer))
         {
             return Result<std::vector<u32>>(std::string("GLSLANG: ") + shader.getInfoLog() + shader.getInfoDebugLog());
         }
@@ -849,7 +859,7 @@ namespace daxa
 
         spv::SpvBuildLogger logger;
         glslang::SpvOptions spv_options{};
-        spv_options.generateDebugInfo = shader_info.compile_options.enable_debug_info.value();
+        spv_options.generateDebugInfo = shader_info.compile_options.enable_debug_info.value_or(false);
         // spv_options.emitNonSemanticShaderDebugInfo = spv_options.generateDebugInfo;
         spv_options.stripDebugInfo = !spv_options.generateDebugInfo;
         std::vector<u32> spv;
@@ -863,7 +873,7 @@ namespace daxa
             std::string const name = std::string("preprocessed_") + debug_name + ".glsl";
             auto filepath = shader_info.compile_options.write_out_preprocessed_code.value() / name;
             std::string preprocessed_result = {};
-            shader.preprocess(&DAXA_DEFAULT_BUILTIN_RESOURCE, 450, EProfile::ENoProfile, false, false, messages, &preprocessed_result, includer);
+            shader.preprocess(&DAXA_DEFAULT_BUILTIN_RESOURCE, SHADER_VERSION, EProfile::ENoProfile, false, false, messages, &preprocessed_result, includer);
             auto ofs = std::ofstream{filepath, std::ios_base::trunc};
             ofs.write(preprocessed_result.data(), static_cast<std::streamsize>(preprocessed_result.size()));
             ofs.close();
@@ -898,7 +908,8 @@ namespace daxa
             auto define_str = define.name;
             if (define.value.length() > 0)
             {
-                define_str = define_str + "=" + define.value;
+                define_str += "=";
+                define_str += define.value;
             }
             wstring_buffer.push_back(u8_ascii_to_wstring(define_str.c_str()));
             args.push_back(L"-D");
@@ -928,6 +939,7 @@ namespace daxa
         args.push_back(L"-spirv");
         args.push_back(L"-fspv-target-env=vulkan1.1");
         // set optimization setting
+        DAXA_DBG_ASSERT_TRUE_M(shader_info.compile_options.opt_level.has_value(), "You must have an opt_level set when compiling HLSL");
         switch (shader_info.compile_options.opt_level.value())
         {
         case 0: args.push_back(L"-O0"); break;
@@ -938,13 +950,14 @@ namespace daxa
         }
         // setting entry point
         args.push_back(L"-E");
-        auto entry_point_wstr = u8_ascii_to_wstring(shader_info.compile_options.entry_point.value().c_str());
+        auto entry_point_wstr = u8_ascii_to_wstring(shader_info.compile_options.entry_point.value_or("main").c_str());
         args.push_back(entry_point_wstr.c_str());
         args.push_back(L"-fvk-use-scalar-layout");
 
         // set shader model
         args.push_back(L"-T");
         std::wstring profile = L"vs_x_x";
+        DAXA_DBG_ASSERT_TRUE_M(shader_info.compile_options.shader_model.has_value(), "You must have a shader model set when compiling HLSL");
         profile[3] = L'0' + static_cast<wchar_t>(shader_info.compile_options.shader_model.value().major);
         profile[5] = L'0' + static_cast<wchar_t>(shader_info.compile_options.shader_model.value().minor);
         switch (shader_stage)

@@ -54,12 +54,12 @@ struct Voxel
         }
     }
 
-    auto is_occluding_nx() const -> bool { return is_occluding(); }
-    auto is_occluding_px() const -> bool { return is_occluding(); }
-    auto is_occluding_ny() const -> bool { return is_occluding(); }
-    auto is_occluding_py() const -> bool { return is_occluding(); }
-    auto is_occluding_nz() const -> bool { return is_occluding(); }
-    auto is_occluding_pz() const -> bool { return is_occluding(); }
+    [[nodiscard]] auto is_occluding_nx() const -> bool { return is_occluding(); }
+    [[nodiscard]] auto is_occluding_px() const -> bool { return is_occluding(); }
+    [[nodiscard]] auto is_occluding_ny() const -> bool { return is_occluding(); }
+    [[nodiscard]] auto is_occluding_py() const -> bool { return is_occluding(); }
+    [[nodiscard]] auto is_occluding_nz() const -> bool { return is_occluding(); }
+    [[nodiscard]] auto is_occluding_pz() const -> bool { return is_occluding(); }
 };
 
 static inline constexpr u64 CHUNK_SIZE = 32;

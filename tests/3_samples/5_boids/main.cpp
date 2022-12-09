@@ -157,7 +157,7 @@ struct App : AppWindow<App>
         return false;
     }
 
-    void update_boids(daxa::CommandList & cmd_list, daxa::BufferId boid_buffer_id, daxa::BufferId old_boid_buffer_id)
+    void update_boids(daxa::CommandList & cmd_list, daxa::BufferId boid_buffer_id, daxa::BufferId old_boid_buffer_id) const
     {
         cmd_list.set_pipeline(update_boids_pipeline);
 

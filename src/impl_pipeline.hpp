@@ -17,7 +17,7 @@ namespace daxa
 
     struct ImplPipeline : ManagedSharedState
     {
-        explicit ImplPipeline(ManagedWeakPtr impl_device);
+        explicit ImplPipeline(ManagedWeakPtr a_impl_device);
 
         ManagedWeakPtr impl_device;
         VkPipeline vk_pipeline = {};

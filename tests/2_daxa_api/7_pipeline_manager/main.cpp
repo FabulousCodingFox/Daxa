@@ -13,7 +13,7 @@ auto main() -> int
     daxa::Context daxa_ctx = daxa::create_context({
         .enable_validation = false,
     });
-    daxa::Device device = daxa_ctx.create_device({
+    daxa::Device const device = daxa_ctx.create_device({
         .debug_name = APPNAME_PREFIX("device"),
     });
     daxa::PipelineManager pipeline_manager = daxa::PipelineManager({
