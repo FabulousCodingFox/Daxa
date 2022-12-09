@@ -19,7 +19,7 @@ namespace daxa
         std::string string;
     };
 
-    using ShaderSource = std::variant<std::monostate, ShaderFile, ShaderCode, ShaderSPIRV>;
+    using ShaderSource = std::variant<std::monostate, ShaderFile, ShaderCode, ShaderBinary>;
 
     struct ShaderDefine
     {
@@ -43,7 +43,7 @@ namespace daxa
         std::optional<std::string> entry_point = {};
         std::vector<std::filesystem::path> root_paths = {};
         std::optional<std::filesystem::path> write_out_preprocessed_code = {};
-        std::optional<std::filesystem::path> write_out_spirv_binary = {};
+        std::optional<std::filesystem::path> write_out_shader_binary = {};
         std::optional<u32> opt_level = {};
         std::optional<ShaderModel> shader_model = {};
         std::optional<ShaderLanguage> language = {};

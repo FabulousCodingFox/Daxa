@@ -430,7 +430,7 @@ namespace daxa
         }
         pipe_result.pipeline = this->info.device.create_compute_pipeline({
             .shader_info = {
-                .spirv = std::move(spirv_result.value()),
+                .binary = std::move(spirv_result.value()),
                 .entry_point = a_info.shader_info.compile_options.entry_point,
             },
             .push_constant_size = modified_info.push_constant_size,
@@ -471,11 +471,11 @@ namespace daxa
         }
         pipe_result.pipeline = this->info.device.create_raster_pipeline({
             .vertex_shader_info = {
-                .spirv = std::move(vert_spirv_result.value()),
+                .binary = std::move(vert_spirv_result.value()),
                 .entry_point = a_info.vertex_shader_info.compile_options.entry_point,
             },
             .fragment_shader_info = {
-                .spirv = std::move(frag_spirv_result.value()),
+                .binary = std::move(frag_spirv_result.value()),
                 .entry_point = a_info.fragment_shader_info.compile_options.entry_point,
             },
             .color_attachments = modified_info.color_attachments,
@@ -593,9 +593,9 @@ namespace daxa
     {
         current_shader_info = &shader_info;
         std::vector<u32> spirv = {};
-        if (std::holds_alternative<ShaderSPIRV>(shader_info.source))
+        if (std::holds_alternative<ShaderBinary>(shader_info.source))
         {
-            spirv = std::get<ShaderSPIRV>(shader_info.source);
+            spirv = std::get<ShaderBinary>(shader_info.source);
         }
         else
         {
@@ -655,13 +655,13 @@ namespace daxa
             debug_name = shader_info.debug_name;
         }
 
-        if (shader_info.compile_options.write_out_spirv_binary.has_value())
+        if (shader_info.compile_options.write_out_shader_binary.has_value())
         {
             std::replace(debug_name.begin(), debug_name.end(), '/', '_');
             std::replace(debug_name.begin(), debug_name.end(), '\\', '_');
             std::replace(debug_name.begin(), debug_name.end(), ':', '_');
             debug_name = debug_name + ".spv";
-            std::ofstream ofs(shader_info.compile_options.write_out_spirv_binary.value() / debug_name, std::ios_base::trunc | std::ios_base::binary);
+            std::ofstream ofs(shader_info.compile_options.write_out_shader_binary.value() / debug_name, std::ios_base::trunc | std::ios_base::binary);
             ofs.write(reinterpret_cast<char const *>(spirv.data()), spirv.size() * 4ull);
             ofs.close();
         }

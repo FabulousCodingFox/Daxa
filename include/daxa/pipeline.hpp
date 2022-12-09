@@ -4,10 +4,10 @@
 
 namespace daxa
 {
-    using ShaderSPIRV = std::vector<u32>;
+    using ShaderBinary = std::vector<u32>;
 
     struct ShaderInfo {
-        ShaderSPIRV spirv = {};
+        ShaderBinary binary = {};
         std::optional<std::string> entry_point = {};
     };
 
