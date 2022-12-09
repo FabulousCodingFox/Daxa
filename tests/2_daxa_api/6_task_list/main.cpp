@@ -283,17 +283,18 @@ namespace tests
                 .debug_name = APPNAME_PREFIX("swapchain (drawing)"),
             });
 
-            daxa::PipelineCompiler pipeline_compiler = device.create_pipeline_compiler({
+            daxa::PipelineManager pipeline_manager = daxa::PipelineManager({
+                .device = device,
                 .shader_compile_options = {
                     .root_paths = {
                         "tests/2_daxa_api/6_task_list/shaders",
                         "include",
                     },
                 },
-                .debug_name = APPNAME_PREFIX("pipeline_compiler (drawing)"),
+                .debug_name = APPNAME_PREFIX("pipeline_manager (drawing)"),
             });
             // clang-format off
-            daxa::RasterPipeline raster_pipeline = pipeline_compiler.create_raster_pipeline({
+            daxa::RasterPipelineId raster_pipeline = pipeline_manager.add_raster_pipeline({
                 .vertex_shader_info = {.source = daxa::ShaderFile{"vert.hlsl"}},
                 .fragment_shader_info = {.source = daxa::ShaderFile{"frag.hlsl"}},
                 .color_attachments = {{.format = swapchain.get_format()}},
@@ -346,7 +347,7 @@ namespace tests
                             .color_attachments = {{.image_view = render_image.default_view()}},
                             .render_area = {.x = 0, .y = 0, .width = size_x, .height = size_y},
                         });
-                        cmd_list.set_pipeline(raster_pipeline);
+                        cmd_list.set_pipeline(pipeline_manager.get_pipeline(raster_pipeline));
                         cmd_list.draw({.vertex_count = 3});
                         cmd_list.end_renderpass();
                     },
@@ -393,15 +394,16 @@ namespace tests
 
             void draw()
             {
-                if (pipeline_compiler.check_if_sources_changed(raster_pipeline))
-                {
-                    auto new_pipeline = pipeline_compiler.recreate_raster_pipeline(raster_pipeline);
-                    std::cout << new_pipeline.to_string() << std::endl;
-                    if (new_pipeline.is_ok())
-                    {
-                        raster_pipeline = new_pipeline.value();
-                    }
-                }
+                // if (pipeline_manager.check_if_sources_changed(raster_pipeline))
+                // {
+                //     auto new_pipeline = pipeline_manager.recreate_raster_pipeline(raster_pipeline);
+                //     std::cout << new_pipeline.to_string() << std::endl;
+                //     if (new_pipeline.is_ok())
+                //     {
+                //         raster_pipeline = new_pipeline.value();
+                //     }
+                // }
+                pipeline_manager.reload_all();
 
                 task_list.remove_runtime_image(task_swapchain_image, swapchain_image);
                 swapchain_image = swapchain.acquire_next_image();

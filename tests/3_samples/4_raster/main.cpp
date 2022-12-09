@@ -453,7 +453,7 @@ struct RenderableVoxelWorld
 struct App : BaseApp<App>
 {
     // clang-format off
-    daxa::RasterPipeline raster_pipeline = pipeline_compiler.create_raster_pipeline({
+    daxa::RasterPipelineId raster_pipeline = pipeline_manager.add_raster_pipeline({
         .vertex_shader_info = {.source = daxa::ShaderFile{"draw.glsl"}, .compile_options = {.defines = {daxa::ShaderDefine{"DRAW_VERT"}}}},
         .fragment_shader_info = {.source = daxa::ShaderFile{"draw.glsl"}, .compile_options = {.defines = {daxa::ShaderDefine{"DRAW_FRAG"}}}},
         .color_attachments = {{.format = swapchain.get_format()}},
@@ -510,7 +510,11 @@ struct App : BaseApp<App>
     }
     void on_update()
     {
-        reload_pipeline(raster_pipeline);
+        auto reloaded_result = pipeline_manager.reload_all();
+        if (reloaded_result.is_err())
+        {
+            std::cout << reloaded_result.to_string() << std::endl;
+        }
         ui_update();
 
         player.camera.resize(static_cast<i32>(size_x), static_cast<i32>(size_y));
@@ -668,7 +672,7 @@ struct App : BaseApp<App>
                     .render_area = {.x = 0, .y = 0, .width = size_x, .height = size_y},
                 });
                 auto mat = player.camera.get_vp();
-                cmd_list.set_pipeline(raster_pipeline);
+                cmd_list.set_pipeline(pipeline_manager.get_pipeline(raster_pipeline));
                 for (auto & chunk : renderable_world.renderable_chunks)
                 {
                     if (!chunk.invalid)
