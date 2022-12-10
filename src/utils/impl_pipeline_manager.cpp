@@ -499,8 +499,8 @@ namespace daxa
         {
             return Result<ComputePipeline>(pipe_result.m);
         }
-        this->compute_pipelines.push_back(std::move(pipe_result.value()));
-        return Result<ComputePipeline>(pipe_result.value().pipeline);
+        this->compute_pipelines.push_back(pipe_result.value());
+        return Result<ComputePipeline>(std::move(pipe_result.value().pipeline));
     }
 
     auto ImplPipelineManager::add_raster_pipeline(RasterPipelineCompileInfo const & a_info) -> Result<RasterPipeline>
@@ -510,8 +510,8 @@ namespace daxa
         {
             return Result<RasterPipeline>(pipe_result.m);
         }
-        this->raster_pipelines.push_back(std::move(pipe_result.value()));
-        return Result<RasterPipeline>(pipe_result.value().pipeline);
+        this->raster_pipelines.push_back(pipe_result.value());
+        return Result<RasterPipeline>(std::move(pipe_result.value().pipeline));
     }
 
     auto ImplPipelineManager::reload_all() -> Result<bool>
