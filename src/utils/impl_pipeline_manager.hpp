@@ -74,7 +74,7 @@ namespace daxa
         {
             IDxcUtils * dxc_utils = nullptr;
             IDxcCompiler3 * dxc_compiler = nullptr;
-            IDxcIncludeHandler * dxc_includer = nullptr;
+            std::shared_ptr<IDxcIncludeHandler> dxc_includer = nullptr;
         };
         DxcBackend dxc_backend = {};
 #endif

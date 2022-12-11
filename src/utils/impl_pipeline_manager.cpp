@@ -393,9 +393,9 @@ namespace daxa
             [[maybe_unused]] HRESULT dxc_compiler_result = DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&this->dxc_backend.dxc_compiler));
             DAXA_DBG_ASSERT_TRUE_M(SUCCEEDED(dxc_compiler_result), "Failed to create DXC compiler");
 
-            this->dxc_backend.dxc_includer = new DxcCustomIncluder();
-            dynamic_cast<DxcCustomIncluder *>(this->dxc_backend.dxc_includer)->impl_pipeline_manager = this;
-            this->dxc_backend.dxc_utils->CreateDefaultIncludeHandler(&dynamic_cast<DxcCustomIncluder *>(this->dxc_backend.dxc_includer)->default_includer);
+            this->dxc_backend.dxc_includer = std::make_shared<DxcCustomIncluder>();
+            dynamic_cast<DxcCustomIncluder &>(*this->dxc_backend.dxc_includer).impl_pipeline_manager = this;
+            this->dxc_backend.dxc_utils->CreateDefaultIncludeHandler(&dynamic_cast<DxcCustomIncluder &>(*this->dxc_backend.dxc_includer).default_includer);
         }
 #endif
     }
@@ -405,11 +405,6 @@ namespace daxa
 #if DAXA_BUILT_WITH_GLSLANG
         {
             glslang::FinalizeProcess();
-        }
-#endif
-#if DAXA_BUILT_WITH_DXC
-        {
-            delete this->dxc_backend.dxc_includer;
         }
 #endif
     }
@@ -983,10 +978,10 @@ namespace daxa
         };
 
         IDxcResult * result = nullptr;
-        dynamic_cast<DxcCustomIncluder *>(this->dxc_backend.dxc_includer)->impl_pipeline_manager = this;
+        dynamic_cast<DxcCustomIncluder &>(*this->dxc_backend.dxc_includer).impl_pipeline_manager = this;
         this->dxc_backend.dxc_compiler->Compile(
             &source_buffer, args.data(), static_cast<u32>(args.size()),
-            this->dxc_backend.dxc_includer, IID_PPV_ARGS(&result));
+            this->dxc_backend.dxc_includer.get(), IID_PPV_ARGS(&result));
         IDxcBlobUtf8 * error_message = nullptr;
         result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&error_message), nullptr);
 
