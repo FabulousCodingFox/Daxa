@@ -33,7 +33,7 @@ struct Voxel
 {
     BlockID id;
 
-    [[nodiscard]] auto is_occluding() const -> bool const
+    [[nodiscard]] auto is_occluding() const -> bool
     {
         switch (id)
         {
@@ -44,7 +44,7 @@ struct Voxel
         default: return true;
         }
     }
-    [[nodiscard]] auto is_cross() const -> bool const
+    [[nodiscard]] auto is_cross() const -> bool
     {
         switch (id)
         {

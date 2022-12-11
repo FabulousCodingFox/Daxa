@@ -134,36 +134,6 @@ struct BaseApp : AppWindow<T>
         return false;
     }
 
-    auto reload_pipeline(daxa::ComputePipeline & pipeline) -> bool
-    {
-        if (pipeline_manager.check_if_sources_changed(pipeline))
-        {
-            auto new_pipeline = pipeline_manager.recreate_compute_pipeline(pipeline);
-            std::cout << new_pipeline.to_string() << std::endl;
-            if (new_pipeline.is_ok())
-            {
-                pipeline = new_pipeline.value();
-                return true;
-            }
-        }
-        return false;
-    }
-
-    auto reload_pipeline(daxa::RasterPipeline & pipeline) -> bool
-    {
-        if (pipeline_manager.check_if_sources_changed(pipeline))
-        {
-            auto new_pipeline = pipeline_manager.recreate_raster_pipeline(pipeline);
-            std::cout << new_pipeline.to_string() << std::endl;
-            if (new_pipeline.is_ok())
-            {
-                pipeline = new_pipeline.value();
-                return true;
-            }
-        }
-        return false;
-    }
-
     auto record_loop_task_list() -> daxa::TaskList
     {
         daxa::TaskList new_task_list = daxa::TaskList({

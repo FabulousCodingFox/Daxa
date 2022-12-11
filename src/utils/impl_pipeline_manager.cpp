@@ -670,7 +670,7 @@ namespace daxa
             std::replace(debug_name.begin(), debug_name.end(), ':', '_');
             debug_name = debug_name + ".spv";
             std::ofstream ofs(shader_info.compile_options.write_out_shader_binary.value() / debug_name, std::ios_base::trunc | std::ios_base::binary);
-            ofs.write(reinterpret_cast<char const *>(spirv.data()), spirv.size() * 4ull);
+            ofs.write(reinterpret_cast<char const *>(spirv.data()), static_cast<std::streamsize>(spirv.size() * 4));
             ofs.close();
         }
         return Result<std::vector<u32>>(spirv);
