@@ -46,7 +46,7 @@ namespace daxa
         template <typename PipeT, typename InfoT>
         struct PipelineState
         {
-            PipeT pipeline;
+            std::shared_ptr<PipeT> pipeline_ptr;
             InfoT info;
             std::chrono::file_clock::time_point last_hotload_time = {};
             ShaderFileTimeSet observed_hotload_files = {};
@@ -84,8 +84,8 @@ namespace daxa
 
         auto create_compute_pipeline(ComputePipelineCompileInfo const & a_info) -> Result<ComputePipelineState>;
         auto create_raster_pipeline(RasterPipelineCompileInfo const & a_info) -> Result<RasterPipelineState>;
-        auto add_compute_pipeline(ComputePipelineCompileInfo const & a_info) -> Result<ComputePipeline>;
-        auto add_raster_pipeline(RasterPipelineCompileInfo const & a_info) -> Result<RasterPipeline>;
+        auto add_compute_pipeline(ComputePipelineCompileInfo const & a_info) -> Result<std::shared_ptr<ComputePipeline>>;
+        auto add_raster_pipeline(RasterPipelineCompileInfo const & a_info) -> Result<std::shared_ptr<RasterPipeline>>;
         auto reload_all() -> Result<bool>;
 
         auto full_path_to_file(std::filesystem::path const & path) -> Result<std::filesystem::path>;

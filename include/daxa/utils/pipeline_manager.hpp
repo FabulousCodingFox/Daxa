@@ -91,8 +91,8 @@ namespace daxa
 
         PipelineManager(PipelineManagerInfo info);
 
-        auto add_compute_pipeline(ComputePipelineCompileInfo const & info) -> Result<ComputePipeline>;
-        auto add_raster_pipeline(RasterPipelineCompileInfo const & info) -> Result<RasterPipeline>;
+        auto add_compute_pipeline(ComputePipelineCompileInfo const & info) -> Result<std::shared_ptr<ComputePipeline>>;
+        auto add_raster_pipeline(RasterPipelineCompileInfo const & info) -> Result<std::shared_ptr<RasterPipeline>>;
         auto reload_all() -> Result<bool>;
     };
 } // namespace daxa

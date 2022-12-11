@@ -94,11 +94,15 @@ namespace tests
         task_list.add_task({
             .used_buffers = {},
             .used_images = {
-                {task_image, daxa::TaskImageAccess::SHADER_READ_WRITE, daxa::ImageMipArraySlice{
-                                                                           .image_aspect = daxa::ImageAspectFlagBits::COLOR,
-                                                                           .level_count = 1,
-                                                                           .layer_count = 2,
-                                                                       }},
+                {
+                    task_image,
+                    daxa::TaskImageAccess::SHADER_READ_WRITE,
+                    daxa::ImageMipArraySlice{
+                        .image_aspect = daxa::ImageAspectFlagBits::COLOR,
+                        .level_count = 1,
+                        .layer_count = 2,
+                    },
+                },
             },
             .task = [](daxa::TaskRuntime const &) {},
             .debug_name = APPNAME_PREFIX("write image 2"),
@@ -294,7 +298,7 @@ namespace tests
                 .debug_name = APPNAME_PREFIX("pipeline_manager (drawing)"),
             });
             // clang-format off
-            daxa::RasterPipeline raster_pipeline = pipeline_manager.add_raster_pipeline({
+            std::shared_ptr<daxa::RasterPipeline> raster_pipeline = pipeline_manager.add_raster_pipeline({
                 .vertex_shader_info = {.source = daxa::ShaderFile{"vert.hlsl"}},
                 .fragment_shader_info = {.source = daxa::ShaderFile{"frag.hlsl"}},
                 .color_attachments = {{.format = swapchain.get_format()}},
@@ -347,7 +351,7 @@ namespace tests
                             .color_attachments = {{.image_view = render_image.default_view()}},
                             .render_area = {.x = 0, .y = 0, .width = size_x, .height = size_y},
                         });
-                        cmd_list.set_pipeline(raster_pipeline);
+                        cmd_list.set_pipeline(*raster_pipeline);
                         cmd_list.draw({.vertex_count = 3});
                         cmd_list.end_renderpass();
                     },

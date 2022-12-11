@@ -8,7 +8,7 @@ using namespace daxa::types;
 struct App : BaseApp<App>
 {
     // clang-format off
-    daxa::ComputePipeline compute_pipeline = pipeline_manager.add_compute_pipeline({
+    std::shared_ptr<daxa::ComputePipeline> compute_pipeline = pipeline_manager.add_compute_pipeline({
 #if DAXA_SHADERLANG == DAXA_SHADERLANG_GLSL
         .shader_info = {.source = daxa::ShaderFile{"compute.glsl"}},
 #elif DAXA_SHADERLANG == DAXA_SHADERLANG_HLSL
@@ -59,7 +59,7 @@ struct App : BaseApp<App>
     {
         gpu_input.time = time;
         gpu_input.delta_time = delta_time;
-        
+
         auto reloaded_result = pipeline_manager.reload_all();
         if (reloaded_result.is_err())
         {
@@ -157,7 +157,7 @@ struct App : BaseApp<App>
             .task = [this](daxa::TaskRuntime runtime)
             {
                 auto cmd_list = runtime.get_command_list();
-                cmd_list.set_pipeline(compute_pipeline);
+                cmd_list.set_pipeline(*compute_pipeline);
                 cmd_list.push_constant(ComputePush {
                     .image_id = render_image.default_view(),
 #if DAXA_SHADERLANG == DAXA_SHADERLANG_GLSL

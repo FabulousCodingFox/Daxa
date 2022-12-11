@@ -17,8 +17,6 @@ endif()
 
 project(daxa VERSION 1.0.0)
 
-set(CMAKE_UNITY_BUILD true)
-
 if(DAXA_ENABLE_STATIC_ANALYSIS)
     set(CPPCHECK_TEMPLATE "gcc")
     find_program(CPPCHECK cppcheck)
@@ -42,6 +40,8 @@ if(DAXA_ENABLE_STATIC_ANALYSIS)
             ${CLANG_TIDY}
             --fix)
     endif()
+else()
+    set(CMAKE_UNITY_BUILD true)
 endif()
 
 add_library(daxa STATIC

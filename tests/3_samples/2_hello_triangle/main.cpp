@@ -8,7 +8,7 @@ using namespace daxa::types;
 struct App : BaseApp<App>
 {
     // clang-format off
-    daxa::RasterPipeline raster_pipeline = pipeline_manager.add_raster_pipeline({
+    std::shared_ptr<daxa::RasterPipeline> raster_pipeline = pipeline_manager.add_raster_pipeline({
 #if DAXA_SHADERLANG == DAXA_SHADERLANG_GLSL
         .vertex_shader_info = {.source = daxa::ShaderFile{"draw.glsl"}, .compile_options = {.defines = {daxa::ShaderDefine{"DRAW_VERT"}}}},
         .fragment_shader_info = {.source = daxa::ShaderFile{"draw.glsl"}, .compile_options = {.defines = {daxa::ShaderDefine{"DRAW_FRAG"}}}},
@@ -126,7 +126,7 @@ struct App : BaseApp<App>
                     .color_attachments = {{.image_view = swapchain_image.default_view(), .load_op = daxa::AttachmentLoadOp::CLEAR, .clear_value = std::array<f32, 4>{0.1f, 0.0f, 0.5f, 1.0f}}},
                     .render_area = {.x = 0, .y = 0, .width = size_x, .height = size_y},
                 });
-                cmd_list.set_pipeline(raster_pipeline);
+                cmd_list.set_pipeline(*raster_pipeline);
                 cmd_list.push_constant(DrawPush {
 #if DAXA_SHADERLANG == DAXA_SHADERLANG_GLSL
                     .face_buffer = this->device.get_device_address(vertex_buffer),

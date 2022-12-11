@@ -338,16 +338,16 @@ namespace daxa
 
     PipelineManager::PipelineManager(PipelineManagerInfo info) : ManagedPtr(new ImplPipelineManager{std::move(info)}) {}
 
-    auto PipelineManager::add_compute_pipeline(ComputePipelineCompileInfo const & info) -> Result<ComputePipeline>
+    auto PipelineManager::add_compute_pipeline(ComputePipelineCompileInfo const & info) -> Result<std::shared_ptr<ComputePipeline>>
     {
         auto & impl = *reinterpret_cast<ImplPipelineManager *>(this->object);
-        return impl.add_compute_pipeline(info);
+        return std::move(impl.add_compute_pipeline(info));
     }
 
-    auto PipelineManager::add_raster_pipeline(RasterPipelineCompileInfo const & info) -> Result<RasterPipeline>
+    auto PipelineManager::add_raster_pipeline(RasterPipelineCompileInfo const & info) -> Result<std::shared_ptr<RasterPipeline>>
     {
         auto & impl = *reinterpret_cast<ImplPipelineManager *>(this->object);
-        return impl.add_raster_pipeline(info);
+        return std::move(impl.add_raster_pipeline(info));
     }
 
     auto PipelineManager::reload_all() -> Result<bool>
@@ -392,10 +392,10 @@ namespace daxa
             DAXA_DBG_ASSERT_TRUE_M(SUCCEEDED(dxc_utils_result), "Failed to create DXC utils");
             [[maybe_unused]] HRESULT dxc_compiler_result = DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&this->dxc_backend.dxc_compiler));
             DAXA_DBG_ASSERT_TRUE_M(SUCCEEDED(dxc_compiler_result), "Failed to create DXC compiler");
-            ComPtr<DxcCustomIncluder> dxc_includer = new DxcCustomIncluder();
-            dxc_includer->impl_pipeline_manager = this;
-            this->dxc_backend.dxc_utils->CreateDefaultIncludeHandler(&(dxc_includer->default_includer));
-            this->dxc_backend.dxc_includer = dxc_includer.Detach();
+
+            this->dxc_backend.dxc_includer = new DxcCustomIncluder();
+            dynamic_cast<DxcCustomIncluder *>(this->dxc_backend.dxc_includer)->impl_pipeline_manager = this;
+            this->dxc_backend.dxc_utils->CreateDefaultIncludeHandler(&this->dxc_backend.dxc_includer);
         }
 #endif
     }
@@ -422,7 +422,7 @@ namespace daxa
             return Result<ComputePipelineState>(std::string("push constant size of ") + std::to_string(modified_info.push_constant_size) + std::string(" is not a multiple of 4(bytes)"));
         }
         auto pipe_result = ComputePipelineState{
-            .pipeline = {},
+            .pipeline_ptr = std::make_shared<ComputePipeline>(),
             .info = modified_info,
             .last_hotload_time = std::chrono::file_clock::now(),
             .observed_hotload_files = {},
@@ -433,7 +433,7 @@ namespace daxa
         {
             return Result<ComputePipelineState>(spirv_result.message());
         }
-        pipe_result.pipeline = this->info.device.create_compute_pipeline({
+        (*pipe_result.pipeline_ptr) = this->info.device.create_compute_pipeline({
             .shader_info = {
                 .binary = std::move(spirv_result.value()),
                 .entry_point = a_info.shader_info.compile_options.entry_point,
@@ -458,7 +458,7 @@ namespace daxa
             return Result<RasterPipelineState>(std::string("push constant size of ") + std::to_string(modified_info.push_constant_size) + std::string(" is not a multiple of 4(bytes)"));
         }
         auto pipe_result = RasterPipelineState{
-            .pipeline = {},
+            .pipeline_ptr = std::make_shared<RasterPipeline>(),
             .info = modified_info,
             .last_hotload_time = std::chrono::file_clock::now(),
             .observed_hotload_files = {},
@@ -474,7 +474,7 @@ namespace daxa
         {
             return Result<RasterPipelineState>(frag_spirv_result.message());
         }
-        pipe_result.pipeline = this->info.device.create_raster_pipeline({
+        (*pipe_result.pipeline_ptr) = this->info.device.create_raster_pipeline({
             .vertex_shader_info = {
                 .binary = std::move(vert_spirv_result.value()),
                 .entry_point = a_info.vertex_shader_info.compile_options.entry_point,
@@ -492,26 +492,26 @@ namespace daxa
         return Result<RasterPipelineState>(std::move(pipe_result));
     }
 
-    auto ImplPipelineManager::add_compute_pipeline(ComputePipelineCompileInfo const & a_info) -> Result<ComputePipeline>
+    auto ImplPipelineManager::add_compute_pipeline(ComputePipelineCompileInfo const & a_info) -> Result<std::shared_ptr<ComputePipeline>>
     {
         auto pipe_result = create_compute_pipeline(a_info);
         if (pipe_result.is_err())
         {
-            return Result<ComputePipeline>(pipe_result.m);
+            return Result<std::shared_ptr<ComputePipeline>>(pipe_result.m);
         }
         this->compute_pipelines.push_back(pipe_result.value());
-        return Result<ComputePipeline>(std::move(pipe_result.value().pipeline));
+        return Result<std::shared_ptr<ComputePipeline>>(std::move(pipe_result.value().pipeline_ptr));
     }
 
-    auto ImplPipelineManager::add_raster_pipeline(RasterPipelineCompileInfo const & a_info) -> Result<RasterPipeline>
+    auto ImplPipelineManager::add_raster_pipeline(RasterPipelineCompileInfo const & a_info) -> Result<std::shared_ptr<RasterPipeline>>
     {
         auto pipe_result = create_raster_pipeline(a_info);
         if (pipe_result.is_err())
         {
-            return Result<RasterPipeline>(pipe_result.m);
+            return Result<std::shared_ptr<RasterPipeline>>(pipe_result.m);
         }
         this->raster_pipelines.push_back(pipe_result.value());
-        return Result<RasterPipeline>(std::move(pipe_result.value().pipeline));
+        return Result<std::shared_ptr<RasterPipeline>>(std::move(pipe_result.value().pipeline_ptr));
     }
 
     auto ImplPipelineManager::reload_all() -> Result<bool>
@@ -564,7 +564,7 @@ namespace daxa
                 auto new_pipeline = create_compute_pipeline(compile_info);
                 if (new_pipeline.is_ok())
                 {
-                    pipeline = new_pipeline.value().pipeline;
+                    *pipeline = std::move(*new_pipeline.value().pipeline_ptr);
                     reloaded = true;
                 }
                 else
@@ -581,7 +581,7 @@ namespace daxa
                 auto new_pipeline = create_raster_pipeline(compile_info);
                 if (new_pipeline.is_ok())
                 {
-                    pipeline = new_pipeline.value().pipeline;
+                    *pipeline = std::move(*new_pipeline.value().pipeline_ptr);
                     reloaded = true;
                 }
                 else
@@ -978,6 +978,7 @@ namespace daxa
         };
 
         IDxcResult * result = nullptr;
+        dynamic_cast<DxcCustomIncluder *>(this->dxc_backend.dxc_includer)->impl_pipeline_manager = this;
         this->dxc_backend.dxc_compiler->Compile(
             &source_buffer, args.data(), static_cast<u32>(args.size()),
             this->dxc_backend.dxc_includer, IID_PPV_ARGS(&result));

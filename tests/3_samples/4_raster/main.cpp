@@ -453,7 +453,7 @@ struct RenderableVoxelWorld
 struct App : BaseApp<App>
 {
     // clang-format off
-    daxa::RasterPipeline raster_pipeline = pipeline_manager.add_raster_pipeline({
+    std::shared_ptr<daxa::RasterPipeline> raster_pipeline = pipeline_manager.add_raster_pipeline({
         .vertex_shader_info = {.source = daxa::ShaderFile{"draw.glsl"}, .compile_options = {.defines = {daxa::ShaderDefine{"DRAW_VERT"}}}},
         .fragment_shader_info = {.source = daxa::ShaderFile{"draw.glsl"}, .compile_options = {.defines = {daxa::ShaderDefine{"DRAW_FRAG"}}}},
         .color_attachments = {{.format = swapchain.get_format()}},
@@ -672,7 +672,7 @@ struct App : BaseApp<App>
                     .render_area = {.x = 0, .y = 0, .width = size_x, .height = size_y},
                 });
                 auto mat = player.camera.get_vp();
-                cmd_list.set_pipeline(raster_pipeline);
+                cmd_list.set_pipeline(*raster_pipeline);
                 for (auto & chunk : renderable_world.renderable_chunks)
                 {
                     if (!chunk.invalid)

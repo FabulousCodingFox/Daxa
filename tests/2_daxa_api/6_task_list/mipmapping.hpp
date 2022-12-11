@@ -48,7 +48,7 @@ namespace tests
             }
 
             // clang-format off
-            daxa::ComputePipeline compute_pipeline = [&]() { 
+            std::shared_ptr<daxa::ComputePipeline> compute_pipeline = [&]() { 
                 auto result = pipeline_manager.add_compute_pipeline({
                     .shader_info = {.source = daxa::ShaderFile{"mipmapping.glsl"}, .debug_name = "compute shader" },
                     .push_constant_size = sizeof(MipmappingComputePushConstant),
@@ -200,7 +200,7 @@ namespace tests
                 if (mouse_drawing)
                 {
                     auto render_target_size = device.info_image(render_target_id).size;
-                    cmd_list.set_pipeline(compute_pipeline);
+                    cmd_list.set_pipeline(*compute_pipeline);
                     auto const push = MipmappingComputePushConstant{
                         .image = render_target_id.default_view(),
                         .gpu_input = device.get_device_address(input_buffer),

@@ -6,7 +6,8 @@ namespace daxa
 {
     using ShaderBinary = std::vector<u32>;
 
-    struct ShaderInfo {
+    struct ShaderInfo
+    {
         ShaderBinary binary = {};
         std::optional<std::string> entry_point = {};
     };
