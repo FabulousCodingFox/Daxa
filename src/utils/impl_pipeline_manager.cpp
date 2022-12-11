@@ -395,7 +395,7 @@ namespace daxa
 
             this->dxc_backend.dxc_includer = new DxcCustomIncluder();
             dynamic_cast<DxcCustomIncluder *>(this->dxc_backend.dxc_includer)->impl_pipeline_manager = this;
-            this->dxc_backend.dxc_utils->CreateDefaultIncludeHandler(&this->dxc_backend.dxc_includer);
+            this->dxc_backend.dxc_utils->CreateDefaultIncludeHandler(&dynamic_cast<DxcCustomIncluder *>(this->dxc_backend.dxc_includer)->default_includer);
         }
 #endif
     }
@@ -405,6 +405,11 @@ namespace daxa
 #if DAXA_BUILT_WITH_GLSLANG
         {
             glslang::FinalizeProcess();
+        }
+#endif
+#if DAXA_BUILT_WITH_DXC
+        {
+            delete this->dxc_backend.dxc_includer;
         }
 #endif
     }
