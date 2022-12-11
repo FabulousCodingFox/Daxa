@@ -341,13 +341,13 @@ namespace daxa
     auto PipelineManager::add_compute_pipeline(ComputePipelineCompileInfo const & info) -> Result<std::shared_ptr<ComputePipeline>>
     {
         auto & impl = *reinterpret_cast<ImplPipelineManager *>(this->object);
-        return std::move(impl.add_compute_pipeline(info));
+        return impl.add_compute_pipeline(info);
     }
 
     auto PipelineManager::add_raster_pipeline(RasterPipelineCompileInfo const & info) -> Result<std::shared_ptr<RasterPipeline>>
     {
         auto & impl = *reinterpret_cast<ImplPipelineManager *>(this->object);
-        return std::move(impl.add_raster_pipeline(info));
+        return impl.add_raster_pipeline(info);
     }
 
     auto PipelineManager::reload_all() -> Result<bool>
