@@ -73,6 +73,7 @@ struct BaseApp : AppWindow<T>
 #elif DAXA_SHADERLANG == DAXA_SHADERLANG_HLSL
             .language = daxa::ShaderLanguage::HLSL,
 #endif
+            .enable_debug_info = true,
         },
         .debug_name = APPNAME_PREFIX("pipeline_manager"),
     });

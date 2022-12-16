@@ -44,7 +44,6 @@ namespace daxa
         std::vector<std::filesystem::path> root_paths = {};
         std::optional<std::filesystem::path> write_out_preprocessed_code = {};
         std::optional<std::filesystem::path> write_out_shader_binary = {};
-        std::optional<u32> opt_level = {};
         std::optional<ShaderModel> shader_model = {};
         std::optional<ShaderLanguage> language = {};
         std::vector<ShaderDefine> defines = {};

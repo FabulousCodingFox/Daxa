@@ -315,10 +315,6 @@ namespace daxa
         {
             this->entry_point = other.entry_point;
         }
-        if (!this->opt_level.has_value())
-        {
-            this->opt_level = other.opt_level;
-        }
         if (!this->shader_model.has_value())
         {
             this->shader_model = other.shader_model;
@@ -362,10 +358,6 @@ namespace daxa
         if (!this->info.shader_compile_options.entry_point.has_value())
         {
             this->info.shader_compile_options.entry_point = std::optional<std::string>{"main"};
-        }
-        if (!this->info.shader_compile_options.opt_level.has_value())
-        {
-            this->info.shader_compile_options.opt_level = std::optional<u32>{0};
         }
         if (!this->info.shader_compile_options.shader_model.has_value())
         {
@@ -612,12 +604,14 @@ namespace daxa
                 {
                     return Result<std::vector<u32>>(ret.message());
                 }
-                auto code_ret = load_shader_source_from_file(ret.value());
-                if (code_ret.is_err())
-                {
-                    return Result<std::vector<u32>>(code_ret.message());
-                }
-                code = code_ret.value();
+                // This is a hack. Instead of providing the file as source code, we provide the full path.
+                code = {.string = std::string("#include \"") + ret.value().string() + "\"\n"};
+                // auto code_ret = load_shader_source_from_file(ret.value());
+                // if (code_ret.is_err())
+                // {
+                //     return Result<std::vector<u32>>(code_ret.message());
+                // }
+                // code = code_ret.value();
             }
             else
             {
@@ -765,15 +759,13 @@ namespace daxa
             }
         };
 
-        DAXA_DBG_ASSERT_TRUE_M(shader_info.compile_options.opt_level < 3, "For glslang, The optimization level must be between 0 and 2 (inclusive)");
-
         std::string preamble;
 
         auto spirv_stage = translate_shader_stage(shader_stage);
 
         // NOTE: You can't set #version in the preamble. However,
         // you can set the version as a `shader.` parameter. This
-        // is unneccessary, though, since it appears to default to
+        // is unnecessary, though, since it appears to default to
         // the latest version.
         // preamble += "#version 450\n";
         preamble += "#define DAXA_SHADER 1\n";
@@ -826,10 +818,15 @@ namespace daxa
         auto const * source_cstr = source_str.c_str();
         auto const * name_cstr = debug_name.c_str();
 
+        bool use_debug_info = shader_info.compile_options.enable_debug_info.value_or(false);
+
         shader.setStringsWithLengthsAndNames(&source_cstr, nullptr, &name_cstr, 1);
         shader.setEntryPoint("main");
         shader.setEnvClient(glslang::EShClientVulkan, glslang::EShTargetVulkan_1_3);
         shader.setEnvTarget(glslang::EShTargetSpv, glslang::EShTargetSpv_1_5);
+
+        // NOTE: For some reason, this causes a crash in GLSLANG
+        // shader.setDebugInfo(use_debug_info);
 
         GlslangFileIncluder includer;
         includer.impl_pipeline_manager = this;
@@ -859,9 +856,12 @@ namespace daxa
 
         spv::SpvBuildLogger logger;
         glslang::SpvOptions spv_options{};
-        spv_options.generateDebugInfo = shader_info.compile_options.enable_debug_info.value_or(false);
-        // spv_options.emitNonSemanticShaderDebugInfo = spv_options.generateDebugInfo;
-        spv_options.stripDebugInfo = !spv_options.generateDebugInfo;
+        spv_options.generateDebugInfo = use_debug_info;
+
+        // NOTE: For some reason, this also causes a crash in GLSLANG
+        // spv_options.emitNonSemanticShaderDebugInfo = use_debug_info;
+
+        spv_options.stripDebugInfo = !use_debug_info;
         std::vector<u32> spv;
         glslang::GlslangToSpv(*intermediary, spv, &logger, &spv_options);
 
@@ -918,12 +918,6 @@ namespace daxa
         args.push_back(L"-DDAXA_SHADER");
         args.push_back(L"-DDAXA_SHADERLANG=2");
 
-        if (std::holds_alternative<ShaderFile>(shader_info.source))
-        {
-            wstring_buffer.push_back(std::get<ShaderFile>(shader_info.source).path.wstring());
-            args.push_back(wstring_buffer.back().c_str());
-        }
-
         for (auto const & root : shader_info.compile_options.root_paths)
         {
             args.push_back(L"-I");
@@ -938,21 +932,16 @@ namespace daxa
         // setting target
         args.push_back(L"-spirv");
         args.push_back(L"-fspv-target-env=vulkan1.1");
-        // set optimization setting
-        DAXA_DBG_ASSERT_TRUE_M(shader_info.compile_options.opt_level.has_value(), "You must have an opt_level set when compiling HLSL");
-        switch (shader_info.compile_options.opt_level.value())
-        {
-        case 0: args.push_back(L"-O0"); break;
-        case 1: args.push_back(L"-O1"); break;
-        case 2: args.push_back(L"-O2"); break;
-        case 3: args.push_back(L"-O3"); break;
-        default: DAXA_DBG_ASSERT_TRUE_M(false, "Bad optimization level set in Pipeline Compiler"); break;
-        }
         // setting entry point
         args.push_back(L"-E");
         auto entry_point_wstr = u8_ascii_to_wstring(shader_info.compile_options.entry_point.value_or("main").c_str());
         args.push_back(entry_point_wstr.c_str());
         args.push_back(L"-fvk-use-scalar-layout");
+        if (shader_info.compile_options.enable_debug_info.value_or(false)) {
+            // insert debug info
+            args.push_back(L"-Zi");
+            args.push_back(L"-fspv-debug=line");
+        }
 
         // set shader model
         args.push_back(L"-T");

@@ -31,7 +31,6 @@ namespace tests
                         "tests/2_daxa_api/6_task_list/shaders",
                         "include",
                     },
-                    .opt_level = 2,
                     .language = daxa::ShaderLanguage::GLSL,
                 },
                 .debug_name = APPNAME_PREFIX("pipeline_manager"),
