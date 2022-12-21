@@ -315,9 +315,13 @@ namespace daxa
         {
             this->entry_point = other.entry_point;
         }
-        if (!this->shader_model.has_value())
+        if (!this->write_out_preprocessed_code.has_value())
         {
-            this->shader_model = other.shader_model;
+            this->write_out_preprocessed_code = other.write_out_preprocessed_code;
+        }
+        if (!this->write_out_shader_binary.has_value())
+        {
+            this->write_out_shader_binary = other.write_out_shader_binary;
         }
         if (!this->language.has_value())
         {
@@ -358,10 +362,6 @@ namespace daxa
         if (!this->info.shader_compile_options.entry_point.has_value())
         {
             this->info.shader_compile_options.entry_point = std::optional<std::string>{"main"};
-        }
-        if (!this->info.shader_compile_options.shader_model.has_value())
-        {
-            this->info.shader_compile_options.shader_model = std::optional<ShaderModel>{ShaderModel{.major = 6, .minor = 6}};
         }
         if (!this->info.shader_compile_options.language.has_value())
         {
@@ -943,12 +943,9 @@ namespace daxa
             args.push_back(L"-fspv-debug=line");
         }
 
-        // set shader model
+        // set shader model explicitly to 6.6
         args.push_back(L"-T");
-        std::wstring profile = L"vs_x_x";
-        DAXA_DBG_ASSERT_TRUE_M(shader_info.compile_options.shader_model.has_value(), "You must have a shader model set when compiling HLSL");
-        profile[3] = L'0' + static_cast<wchar_t>(shader_info.compile_options.shader_model.value().major);
-        profile[5] = L'0' + static_cast<wchar_t>(shader_info.compile_options.shader_model.value().minor);
+        std::wstring profile = L"vs_6_6";
         switch (shader_stage)
         {
         case ShaderStage::COMP: profile[0] = L'c'; break;
