@@ -350,6 +350,18 @@ namespace daxa
         return impl.add_raster_pipeline(info);
     }
 
+    void PipelineManager::remove_compute_pipeline(std::shared_ptr<ComputePipeline> const & pipeline)
+    {
+        auto & impl = *reinterpret_cast<ImplPipelineManager *>(this->object);
+        return impl.remove_compute_pipeline(pipeline);
+    }
+
+    void PipelineManager::remove_raster_pipeline(std::shared_ptr<RasterPipeline> const & pipeline)
+    {
+        auto & impl = *reinterpret_cast<ImplPipelineManager *>(this->object);
+        return impl.remove_raster_pipeline(pipeline);
+    }
+
     auto PipelineManager::reload_all() -> Result<bool>
     {
         auto & impl = *reinterpret_cast<ImplPipelineManager *>(this->object);
@@ -504,6 +516,38 @@ namespace daxa
         }
         this->raster_pipelines.push_back(pipe_result.value());
         return Result<std::shared_ptr<RasterPipeline>>(std::move(pipe_result.value().pipeline_ptr));
+    }
+
+    void ImplPipelineManager::remove_compute_pipeline(std::shared_ptr<ComputePipeline> const & pipeline)
+    {
+        auto pipeline_iter = std::find_if(
+            this->compute_pipelines.begin(),
+            this->compute_pipelines.end(),
+            [&pipeline](std::shared_ptr<ComputePipeline> const & other)
+            {
+                return pipeline.get() == other.get();
+            });
+        if (pipeline_iter == this->compute_pipelines.end())
+        {
+            return;
+        }
+        this->compute_pipelines.erase(pipeline_iter);
+    }
+
+    void ImplPipelineManager::remove_raster_pipeline(std::shared_ptr<RasterPipeline> const & pipeline)
+    {
+        auto pipeline_iter = std::find_if(
+            this->raster_pipelines.begin(),
+            this->raster_pipelines.end(),
+            [&pipeline](std::shared_ptr<RasterPipeline> const & other)
+            {
+                return pipeline.get() == other.get();
+            });
+        if (pipeline_iter == this->raster_pipelines.end())
+        {
+            return;
+        }
+        this->raster_pipelines.erase(pipeline_iter);
     }
 
     auto ImplPipelineManager::reload_all() -> Result<bool>
@@ -937,7 +981,8 @@ namespace daxa
         auto entry_point_wstr = u8_ascii_to_wstring(shader_info.compile_options.entry_point.value_or("main").c_str());
         args.push_back(entry_point_wstr.c_str());
         args.push_back(L"-fvk-use-scalar-layout");
-        if (shader_info.compile_options.enable_debug_info.value_or(false)) {
+        if (shader_info.compile_options.enable_debug_info.value_or(false))
+        {
             // insert debug info
             args.push_back(L"-Zi");
             args.push_back(L"-fspv-debug=line");
