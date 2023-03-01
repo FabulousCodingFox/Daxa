@@ -45,6 +45,7 @@ namespace daxa
                 case DEFERRED_DESTRUCTION_IMAGE_INDEX: impl.main_queue_image_zombies.push_front({current_main_queue_cpu_timeline_value, ImageId{id}}); break;
                 case DEFERRED_DESTRUCTION_IMAGE_VIEW_INDEX: impl.main_queue_image_view_zombies.push_front({current_main_queue_cpu_timeline_value, ImageViewId{id}}); break;
                 case DEFERRED_DESTRUCTION_SAMPLER_INDEX: impl.main_queue_sampler_zombies.push_front({current_main_queue_cpu_timeline_value, SamplerId{id}}); break;
+                case DEFERRED_DESTRUCTION_ACCELERATION_STRUCTURE_INDEX: impl.main_queue_acceleration_structure_zombies.push_front({current_main_queue_cpu_timeline_value, AccelerationStructureId{id}}); break;
                 default: DAXA_DBG_ASSERT_TRUE_M(false, "unreachable");
                 }
             }
@@ -233,6 +234,12 @@ namespace daxa
         return impl.new_sampler(info);
     }
 
+    auto Device::create_acceleration_structure(AccelerationStructureInfo const & info) -> AccelerationStructureId
+    {
+        auto & impl = *as<ImplDevice>();
+        return impl.new_acceleration_structure(info);
+    }
+
     void Device::destroy_buffer(BufferId id)
     {
         auto & impl = *as<ImplDevice>();
@@ -255,6 +262,12 @@ namespace daxa
     {
         auto & impl = *as<ImplDevice>();
         impl.zombify_sampler(id);
+    }
+
+    void Device::destroy_acceleration_structure(AccelerationStructureId id)
+    {
+        auto & impl = *as<ImplDevice>();
+        impl.zombify_acceleration_structure(id);
     }
 
     auto Device::info_buffer(BufferId id) const -> BufferInfo
@@ -296,6 +309,12 @@ namespace daxa
         return impl.slot(id).info;
     }
 
+    auto Device::info_acceleration_structure(AccelerationStructureId id) const -> AccelerationStructureInfo
+    {
+        auto const & impl = *as<ImplDevice>();
+        return impl.slot(id).info;
+    }
+
     auto Device::is_id_valid(ImageId id) const -> bool
     {
         auto const & impl = *as<ImplDevice>();
@@ -307,19 +326,36 @@ namespace daxa
         auto const & impl = *as<ImplDevice>();
         return !id.is_empty() && impl.gpu_shader_resource_table.buffer_slots.is_id_valid(id);
     }
+
     auto Device::is_id_valid(SamplerId id) const -> bool
     {
         auto const & impl = *as<ImplDevice>();
         return !id.is_empty() && impl.gpu_shader_resource_table.sampler_slots.is_id_valid(id);
     }
 
-    ImplDevice::ImplDevice(DeviceInfo a_info, DeviceProperties const & a_vk_info, ManagedWeakPtr a_impl_ctx, VkPhysicalDevice a_physical_device)
+    auto Device::is_id_valid(AccelerationStructureId id) const -> bool
+    {
+        auto const & impl = *as<ImplDevice>();
+        return !id.is_empty() && impl.gpu_shader_resource_table.acceleration_structure_slots.is_id_valid(id);
+    }
+
+    ImplDevice::ImplDevice(DeviceInfo a_info, ManagedWeakPtr a_impl_ctx, VkPhysicalDevice a_physical_device)
         : impl_ctx{std::move(a_impl_ctx)},
           vk_physical_device{a_physical_device},
-          vk_info{a_vk_info},
           info{std::move(a_info)},
           main_queue_family_index(std::numeric_limits<u32>::max())
     {
+        auto vk_device_accel_struct_properties = VkPhysicalDeviceAccelerationStructurePropertiesKHR{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR,
+            .pNext = nullptr,
+        };
+        auto vk_device_properties2 = VkPhysicalDeviceProperties2{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+            .pNext = &vk_device_accel_struct_properties,
+        };
+        vkGetPhysicalDeviceProperties2(vk_physical_device, &vk_device_properties2);
+        vk_info = *reinterpret_cast<DeviceProperties *>(&vk_device_properties2.properties);
+
         // SELECT QUEUE
 
         u32 queue_family_props_count = 0;
@@ -414,17 +450,20 @@ namespace daxa
             .inheritedQueries = VK_FALSE,
         };
 
+        void * REQUIRED_DEVICE_FEATURE_P_CHAIN = nullptr;
+
         VkPhysicalDeviceBufferDeviceAddressFeatures REQUIRED_PHYSICAL_DEVICE_FEATURES_BUFFER_DEVICE_ADDRESS{
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES,
-            .pNext = nullptr,
+            .pNext = REQUIRED_DEVICE_FEATURE_P_CHAIN,
             .bufferDeviceAddress = VK_TRUE,
             .bufferDeviceAddressCaptureReplay = static_cast<VkBool32>(this->info.enable_buffer_device_address_capture_replay),
             .bufferDeviceAddressMultiDevice = VK_FALSE,
         };
+        REQUIRED_DEVICE_FEATURE_P_CHAIN = reinterpret_cast<void *>(&REQUIRED_PHYSICAL_DEVICE_FEATURES_BUFFER_DEVICE_ADDRESS);
 
         VkPhysicalDeviceDescriptorIndexingFeatures REQUIRED_PHYSICAL_DEVICE_FEATURES_DESCRIPTOR_INDEXING{
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES,
-            .pNext = reinterpret_cast<void *>(&REQUIRED_PHYSICAL_DEVICE_FEATURES_BUFFER_DEVICE_ADDRESS),
+            .pNext = REQUIRED_DEVICE_FEATURE_P_CHAIN,
             .shaderInputAttachmentArrayDynamicIndexing = VK_FALSE,
             .shaderUniformTexelBufferArrayDynamicIndexing = VK_FALSE,
             .shaderStorageTexelBufferArrayDynamicIndexing = VK_FALSE,
@@ -446,66 +485,67 @@ namespace daxa
             .descriptorBindingVariableDescriptorCount = VK_FALSE,
             .runtimeDescriptorArray = VK_TRUE, // Allows shaders to not have a hardcoded descriptor maximum per talbe.
         };
+        REQUIRED_DEVICE_FEATURE_P_CHAIN = reinterpret_cast<void *>(&REQUIRED_PHYSICAL_DEVICE_FEATURES_DESCRIPTOR_INDEXING);
 
         VkPhysicalDeviceHostQueryResetFeatures REQUIRED_PHYSICAL_DEVICE_FEATURES_HOST_QUERY_RESET{
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES,
-            .pNext = reinterpret_cast<void *>(&REQUIRED_PHYSICAL_DEVICE_FEATURES_DESCRIPTOR_INDEXING),
+            .pNext = REQUIRED_DEVICE_FEATURE_P_CHAIN,
             .hostQueryReset = VK_TRUE,
         };
+        REQUIRED_DEVICE_FEATURE_P_CHAIN = reinterpret_cast<void *>(&REQUIRED_PHYSICAL_DEVICE_FEATURES_HOST_QUERY_RESET);
 
         VkPhysicalDeviceShaderAtomicInt64Features REQUIRED_PHYSICAL_DEVICE_FEATURES_SHADER_ATOMIC_INT64{
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES,
-            .pNext = reinterpret_cast<void *>(&REQUIRED_PHYSICAL_DEVICE_FEATURES_HOST_QUERY_RESET),
+            .pNext = REQUIRED_DEVICE_FEATURE_P_CHAIN,
             .shaderBufferInt64Atomics = VK_TRUE,
             .shaderSharedInt64Atomics = VK_TRUE,
         };
+        REQUIRED_DEVICE_FEATURE_P_CHAIN = reinterpret_cast<void *>(&REQUIRED_PHYSICAL_DEVICE_FEATURES_SHADER_ATOMIC_INT64);
 
         VkPhysicalDeviceShaderImageAtomicInt64FeaturesEXT REQUIRED_PHYSICAL_DEVICE_FEATURES_SHADER_IMAGE_ATOMIC_INT64{
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_IMAGE_ATOMIC_INT64_FEATURES_EXT,
-            .pNext = reinterpret_cast<void *>(&REQUIRED_PHYSICAL_DEVICE_FEATURES_SHADER_ATOMIC_INT64),
+            .pNext = REQUIRED_DEVICE_FEATURE_P_CHAIN,
             .shaderImageInt64Atomics = VK_TRUE,
             .sparseImageInt64Atomics = VK_FALSE, // I do not care about sparse images.
         };
+        REQUIRED_DEVICE_FEATURE_P_CHAIN = reinterpret_cast<void *>(&REQUIRED_PHYSICAL_DEVICE_FEATURES_SHADER_IMAGE_ATOMIC_INT64);
 
         VkPhysicalDeviceDynamicRenderingFeatures REQUIRED_PHYSICAL_DEVICE_FEATURES_DYNAMIC_RENDERING{
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR,
-            .pNext = reinterpret_cast<void *>(&REQUIRED_PHYSICAL_DEVICE_FEATURES_SHADER_IMAGE_ATOMIC_INT64),
+            .pNext = REQUIRED_DEVICE_FEATURE_P_CHAIN,
             .dynamicRendering = VK_TRUE,
         };
+        REQUIRED_DEVICE_FEATURE_P_CHAIN = reinterpret_cast<void *>(&REQUIRED_PHYSICAL_DEVICE_FEATURES_DYNAMIC_RENDERING);
 
         VkPhysicalDeviceTimelineSemaphoreFeatures REQUIRED_PHYSICAL_DEVICE_FEATURES_TIMELINE_SEMAPHORE{
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES,
-            .pNext = reinterpret_cast<void *>(&REQUIRED_PHYSICAL_DEVICE_FEATURES_DYNAMIC_RENDERING),
+            .pNext = REQUIRED_DEVICE_FEATURE_P_CHAIN,
             .timelineSemaphore = VK_TRUE,
         };
+        REQUIRED_DEVICE_FEATURE_P_CHAIN = reinterpret_cast<void *>(&REQUIRED_PHYSICAL_DEVICE_FEATURES_TIMELINE_SEMAPHORE);
 
         VkPhysicalDeviceSynchronization2Features REQUIRED_PHYSICAL_DEVICE_FEATURES_SYNCHRONIZATION_2{
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR,
-            .pNext = reinterpret_cast<void *>(&REQUIRED_PHYSICAL_DEVICE_FEATURES_TIMELINE_SEMAPHORE),
+            .pNext = REQUIRED_DEVICE_FEATURE_P_CHAIN,
             .synchronization2 = VK_TRUE,
         };
+        REQUIRED_DEVICE_FEATURE_P_CHAIN = reinterpret_cast<void *>(&REQUIRED_PHYSICAL_DEVICE_FEATURES_SYNCHRONIZATION_2);
 
         VkPhysicalDeviceRobustness2FeaturesEXT REQUIRED_PHYSICAL_DEVICE_FEATURES_ROBUSTNESS_2{
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT,
-            .pNext = reinterpret_cast<void *>(&REQUIRED_PHYSICAL_DEVICE_FEATURES_SYNCHRONIZATION_2),
+            .pNext = REQUIRED_DEVICE_FEATURE_P_CHAIN,
             .robustBufferAccess2 = {},
             .robustImageAccess2 = {},
             .nullDescriptor = VK_TRUE,
         };
+        REQUIRED_DEVICE_FEATURE_P_CHAIN = reinterpret_cast<void *>(&REQUIRED_PHYSICAL_DEVICE_FEATURES_ROBUSTNESS_2);
 
         VkPhysicalDeviceScalarBlockLayoutFeatures REQUIRED_PHYSICAL_DEVICE_FEATURES_SCALAR_LAYOUT{
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES,
-            .pNext = reinterpret_cast<void *>(&REQUIRED_PHYSICAL_DEVICE_FEATURES_ROBUSTNESS_2),
+            .pNext = REQUIRED_DEVICE_FEATURE_P_CHAIN,
             .scalarBlockLayout = VK_TRUE,
         };
-
-        void * REQUIRED_DEVICE_FEATURE_P_CHAIN = reinterpret_cast<void *>(&REQUIRED_PHYSICAL_DEVICE_FEATURES_SCALAR_LAYOUT);
-
-        VkPhysicalDeviceFeatures2 physical_device_features_2{
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
-            .pNext = REQUIRED_DEVICE_FEATURE_P_CHAIN,
-            .features = REQUIRED_PHYSICAL_DEVICE_FEATURES,
-        };
+        REQUIRED_DEVICE_FEATURE_P_CHAIN = reinterpret_cast<void *>(&REQUIRED_PHYSICAL_DEVICE_FEATURES_SCALAR_LAYOUT);
 
         std::vector<char const *> extension_names;
         std::vector<char const *> enabled_layers;
@@ -522,12 +562,52 @@ namespace daxa
         if (this->info.enable_conservative_rasterization)
         {
             extension_names.push_back(VK_EXT_CONSERVATIVE_RASTERIZATION_EXTENSION_NAME);
-            // extension_names.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
         }
+
+        if (this->info.enable_raytracing_api)
+        {
+            extension_names.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+            extension_names.push_back(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+            extension_names.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+        }
+
+        auto OPTIONAL_PHYSICAL_DEVICE_FEATURES_ACCELERATION_STRUCTURE = VkPhysicalDeviceAccelerationStructureFeaturesKHR{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
+            .pNext = REQUIRED_DEVICE_FEATURE_P_CHAIN,
+            .accelerationStructure = VK_TRUE,
+            .accelerationStructureCaptureReplay = VK_FALSE,
+            .accelerationStructureIndirectBuild = VK_FALSE,
+            .accelerationStructureHostCommands = VK_FALSE,
+            .descriptorBindingAccelerationStructureUpdateAfterBind = VK_TRUE,
+        };
+        if (this->info.enable_raytracing_api)
+        {
+            REQUIRED_DEVICE_FEATURE_P_CHAIN = reinterpret_cast<void *>(&OPTIONAL_PHYSICAL_DEVICE_FEATURES_ACCELERATION_STRUCTURE);
+        }
+        auto OPTIONAL_PHYSICAL_DEVICE_FEATURES_RAY_TRACING_PIPELINE = VkPhysicalDeviceRayTracingPipelineFeaturesKHR{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR,
+            .pNext = REQUIRED_DEVICE_FEATURE_P_CHAIN,
+            .rayTracingPipeline = VK_TRUE,
+            .rayTracingPipelineShaderGroupHandleCaptureReplay = VK_FALSE,
+            .rayTracingPipelineShaderGroupHandleCaptureReplayMixed = VK_FALSE,
+            .rayTracingPipelineTraceRaysIndirect = VK_FALSE,
+            .rayTraversalPrimitiveCulling = VK_FALSE,
+        };
+        if (this->info.enable_raytracing_api)
+        {
+            REQUIRED_DEVICE_FEATURE_P_CHAIN = reinterpret_cast<void *>(&OPTIONAL_PHYSICAL_DEVICE_FEATURES_RAY_TRACING_PIPELINE);
+        }
+
+        VkPhysicalDeviceFeatures2 physical_device_features_2{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+            .pNext = REQUIRED_DEVICE_FEATURE_P_CHAIN,
+            .features = REQUIRED_PHYSICAL_DEVICE_FEATURES,
+        };
+        REQUIRED_DEVICE_FEATURE_P_CHAIN = reinterpret_cast<void *>(&physical_device_features_2);
 
         VkDeviceCreateInfo const device_ci = {
             .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-            .pNext = &physical_device_features_2,
+            .pNext = REQUIRED_DEVICE_FEATURE_P_CHAIN,
             .flags = {},
             .queueCreateInfoCount = static_cast<u32>(1),
             .pQueueCreateInfos = &queue_ci,
@@ -541,11 +621,26 @@ namespace daxa
 
         this->vkSetDebugUtilsObjectNameEXT = reinterpret_cast<PFN_vkSetDebugUtilsObjectNameEXT>(vkGetDeviceProcAddr(this->vk_device, "vkSetDebugUtilsObjectNameEXT"));
 
+        if (this->info.enable_raytracing_api)
+        {
+            this->vkGetBufferDeviceAddressKHR = reinterpret_cast<PFN_vkGetBufferDeviceAddressKHR>(vkGetDeviceProcAddr(this->vk_device, "vkGetBufferDeviceAddressKHR"));
+            this->vkCmdBuildAccelerationStructuresKHR = reinterpret_cast<PFN_vkCmdBuildAccelerationStructuresKHR>(vkGetDeviceProcAddr(this->vk_device, "vkCmdBuildAccelerationStructuresKHR"));
+            this->vkBuildAccelerationStructuresKHR = reinterpret_cast<PFN_vkBuildAccelerationStructuresKHR>(vkGetDeviceProcAddr(this->vk_device, "vkBuildAccelerationStructuresKHR"));
+            this->vkCreateAccelerationStructureKHR = reinterpret_cast<PFN_vkCreateAccelerationStructureKHR>(vkGetDeviceProcAddr(this->vk_device, "vkCreateAccelerationStructureKHR"));
+            this->vkDestroyAccelerationStructureKHR = reinterpret_cast<PFN_vkDestroyAccelerationStructureKHR>(vkGetDeviceProcAddr(this->vk_device, "vkDestroyAccelerationStructureKHR"));
+            this->vkGetAccelerationStructureBuildSizesKHR = reinterpret_cast<PFN_vkGetAccelerationStructureBuildSizesKHR>(vkGetDeviceProcAddr(this->vk_device, "vkGetAccelerationStructureBuildSizesKHR"));
+            this->vkGetAccelerationStructureDeviceAddressKHR = reinterpret_cast<PFN_vkGetAccelerationStructureDeviceAddressKHR>(vkGetDeviceProcAddr(this->vk_device, "vkGetAccelerationStructureDeviceAddressKHR"));
+            this->vkCmdTraceRaysKHR = reinterpret_cast<PFN_vkCmdTraceRaysKHR>(vkGetDeviceProcAddr(this->vk_device, "vkCmdTraceRaysKHR"));
+            this->vkGetRayTracingShaderGroupHandlesKHR = reinterpret_cast<PFN_vkGetRayTracingShaderGroupHandlesKHR>(vkGetDeviceProcAddr(this->vk_device, "vkGetRayTracingShaderGroupHandlesKHR"));
+            this->vkCreateRayTracingPipelinesKHR = reinterpret_cast<PFN_vkCreateRayTracingPipelinesKHR>(vkGetDeviceProcAddr(this->vk_device, "vkCreateRayTracingPipelinesKHR"));
+        }
+
         u32 const max_buffers = std::min(this->vk_info.limits.max_descriptor_set_storage_buffers, 100'000u);
         u32 const max_images = std::min(std::min(this->vk_info.limits.max_descriptor_set_sampled_images, this->vk_info.limits.max_descriptor_set_storage_images), 10'000u);
         u32 const max_samplers = std::min(this->vk_info.limits.max_descriptor_set_samplers, 1'000u);
         /* If timeline compute and graphics queries are not supported set max_limit to 0 */
         u32 const max_timeline_query_pools = std::min(this->vk_info.limits.timestamp_compute_and_graphics, 1'000u);
+        u32 const max_acceleration_structures = std::min(vk_device_accel_struct_properties.maxDescriptorSetAccelerationStructures, 1'000u);
 
         vkGetDeviceQueue(this->vk_device, this->main_queue_family_index, 0, &this->main_queue_vk_queue);
 
@@ -723,6 +818,7 @@ namespace daxa
             max_buffers,
             max_images,
             max_samplers,
+            max_acceleration_structures,
             max_timeline_query_pools,
             vk_device,
             buffer_device_address_buffer);
@@ -786,6 +882,12 @@ namespace daxa
             [&](auto id)
             {
                 this->cleanup_sampler(id);
+            });
+        check_and_cleanup_gpu_resources(
+            this->main_queue_acceleration_structure_zombies,
+            [&](auto id)
+            {
+                this->cleanup_acceleration_structure(id);
             });
         check_and_cleanup_gpu_resources(
             this->main_queue_pipeline_zombies,
@@ -1259,6 +1361,175 @@ namespace daxa
         return SamplerId{id};
     }
 
+    auto ImplDevice::new_acceleration_structure(AccelerationStructureInfo const & acceleration_structure_info) -> AccelerationStructureId
+    {
+        auto [id, ret] = gpu_shader_resource_table.acceleration_structure_slots.new_slot();
+        auto accel_struct_geom_triangles = VkAccelerationStructureGeometryTrianglesDataKHR{
+            .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
+            .pNext = nullptr,
+            .vertexFormat = {},
+            .vertexData = {},
+            .vertexStride = {},
+            .maxVertex = {},
+            .indexType = {},
+            .indexData = {},
+            .transformData = {},
+        };
+
+        auto accel_struct_geom_aabbs = VkAccelerationStructureGeometryAabbsDataKHR{
+            .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR,
+            .pNext = nullptr,
+            .data = {},
+            .stride = {},
+        };
+
+        auto accel_struct_geom_instances = VkAccelerationStructureGeometryInstancesDataKHR{
+            .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR,
+            .pNext = nullptr,
+            .arrayOfPointers = {},
+            .data = {},
+        };
+
+        auto accel_struct_geom = VkAccelerationStructureGeometryKHR{
+            .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+            .pNext = nullptr,
+            .geometryType = {},
+            .geometry = {},
+            .flags = VK_GEOMETRY_OPAQUE_BIT_KHR,
+        };
+
+        if (std::holds_alternative<AccelerationStructureTriangleDataInfo>(acceleration_structure_info.data_info))
+        {
+            accel_struct_geom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+            accel_struct_geom.geometry = {.triangles = accel_struct_geom_triangles};
+            auto const & triangle_info = std::get<AccelerationStructureTriangleDataInfo>(acceleration_structure_info.data_info);
+            accel_struct_geom_triangles.vertexFormat = static_cast<VkFormat>(triangle_info.vertex_format);
+            if (std::holds_alternative<void *>(triangle_info.vertex_data))
+            {
+                accel_struct_geom_triangles.vertexData.hostAddress = std::get<void *>(triangle_info.vertex_data);
+            }
+            else
+            {
+                accel_struct_geom_triangles.vertexData.deviceAddress = std::get<BufferDeviceAddress>(triangle_info.vertex_data);
+            }
+            accel_struct_geom_triangles.vertexStride = triangle_info.vertex_stride;
+            accel_struct_geom_triangles.maxVertex = triangle_info.max_vertex;
+            accel_struct_geom_triangles.indexType = triangle_info.index_type_byte_size == 0 ? VK_INDEX_TYPE_NONE_KHR : (triangle_info.index_type_byte_size == 2 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
+            if (std::holds_alternative<void *>(triangle_info.index_data))
+            {
+                accel_struct_geom_triangles.indexData.hostAddress = std::get<void *>(triangle_info.index_data);
+            }
+            else
+            {
+                accel_struct_geom_triangles.indexData.deviceAddress = std::get<BufferDeviceAddress>(triangle_info.index_data);
+            }
+            if (std::holds_alternative<void *>(triangle_info.transform_data))
+            {
+                accel_struct_geom_triangles.transformData.hostAddress = std::get<void *>(triangle_info.transform_data);
+            }
+            else
+            {
+                accel_struct_geom_triangles.transformData.deviceAddress = std::get<BufferDeviceAddress>(triangle_info.transform_data);
+            }
+        }
+        else if (std::holds_alternative<AccelerationStructureAabbDataInfo>(acceleration_structure_info.data_info))
+        {
+            accel_struct_geom.geometryType = VK_GEOMETRY_TYPE_AABBS_KHR;
+            accel_struct_geom.geometry = {.aabbs = accel_struct_geom_aabbs};
+            auto const & aabb_info = std::get<AccelerationStructureAabbDataInfo>(acceleration_structure_info.data_info);
+            if (std::holds_alternative<void *>(aabb_info.data))
+            {
+                accel_struct_geom_aabbs.data.hostAddress = std::get<void *>(aabb_info.data);
+            }
+            else
+            {
+                accel_struct_geom_aabbs.data.deviceAddress = std::get<BufferDeviceAddress>(aabb_info.data);
+            }
+            accel_struct_geom_aabbs.stride = aabb_info.stride;
+        }
+        else if (std::holds_alternative<AccelerationStructureInstanceDataInfo>(acceleration_structure_info.data_info))
+        {
+            accel_struct_geom.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+            accel_struct_geom.geometry = {.instances = accel_struct_geom_instances};
+            auto const & instance_info = std::get<AccelerationStructureInstanceDataInfo>(acceleration_structure_info.data_info);
+            accel_struct_geom_instances.arrayOfPointers = instance_info.array_of_pointers;
+            if (std::holds_alternative<void *>(instance_info.data))
+            {
+                accel_struct_geom_instances.data.hostAddress = std::get<void *>(instance_info.data);
+            }
+            else
+            {
+                accel_struct_geom_instances.data.deviceAddress = std::get<BufferDeviceAddress>(instance_info.data);
+            }
+        }
+
+        auto accel_struct_build_geometry_info = VkAccelerationStructureBuildGeometryInfoKHR{
+            .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
+            .type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
+            .flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
+            .geometryCount = 1,
+            .pGeometries = &accel_struct_geom,
+        };
+
+        auto acceleration_structure_build_sizes_info = VkAccelerationStructureBuildSizesInfoKHR{
+            .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR,
+            .pNext = nullptr,
+            .accelerationStructureSize = {},
+            .updateScratchSize = {},
+            .buildScratchSize = {},
+        };
+
+        this->vkGetAccelerationStructureBuildSizesKHR(
+            this->vk_device,
+            VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+            &accel_struct_build_geometry_info,
+            &acceleration_structure_info.max_primitives,
+            &acceleration_structure_build_sizes_info);
+
+        // TODO: Manually create buffer?
+        ret.buffer_id = new_buffer({
+            .size = static_cast<u32>(acceleration_structure_build_sizes_info.accelerationStructureSize),
+            .debug_name = "temp",
+        });
+        ImplBufferSlot & buffer_slot = this->gpu_shader_resource_table.buffer_slots.dereference_id(ret.buffer_id);
+
+        auto vk_acceleration_structure_create_info = VkAccelerationStructureCreateInfoKHR{
+            .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
+            .pNext = nullptr,
+            .createFlags = {},
+            .buffer = buffer_slot.vk_buffer,
+            .offset = {},
+            .size = acceleration_structure_build_sizes_info.accelerationStructureSize,
+            .type = static_cast<VkAccelerationStructureTypeKHR>(acceleration_structure_info.type),
+            .deviceAddress = {},
+        };
+        this->vkCreateAccelerationStructureKHR(this->vk_device, &vk_acceleration_structure_create_info, nullptr, &ret.vk_acceleration_structure);
+
+        if (this->impl_ctx.as<ImplContext>()->enable_debug_names && !acceleration_structure_info.debug_name.empty())
+        {
+            auto const buffer_name = acceleration_structure_info.debug_name + std::string(" [Daxa Buffer]");
+            VkDebugUtilsObjectNameInfoEXT const buffer_name_info{
+                .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
+                .pNext = nullptr,
+                .objectType = VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR,
+                .objectHandle = reinterpret_cast<uint64_t>(ret.vk_acceleration_structure),
+                .pObjectName = buffer_name.c_str(),
+            };
+            this->vkSetDebugUtilsObjectNameEXT(vk_device, &buffer_name_info);
+        }
+
+        write_descriptor_set_acceleration_structure(this->vk_device, this->gpu_shader_resource_table.vk_descriptor_set, ret.vk_acceleration_structure, id.index);
+
+        // ?
+        // auto accel_struct_build_range_info = VkAccelerationStructureBuildRangeInfoKHR{
+        //     .primitiveCount = {},
+        //     .primitiveOffset = {},
+        //     .firstVertex = {},
+        //     .transformOffset = {},
+        // };
+        return AccelerationStructureId{id};
+    }
+
     void ImplDevice::cleanup_buffer(BufferId id)
     {
         ImplBufferSlot & buffer_slot = this->gpu_shader_resource_table.buffer_slots.dereference_id(id);
@@ -1299,6 +1570,17 @@ namespace daxa
         vkDestroySampler(this->vk_device, sampler_slot.vk_sampler, nullptr);
         sampler_slot = {};
         gpu_shader_resource_table.sampler_slots.return_slot(id);
+    }
+
+    void ImplDevice::cleanup_acceleration_structure(AccelerationStructureId id)
+    {
+        ImplAccelerationStructureSlot & acceleration_structure_slot = this->gpu_shader_resource_table.acceleration_structure_slots.dereference_id(id);
+        write_descriptor_set_acceleration_structure(this->vk_device, this->gpu_shader_resource_table.vk_descriptor_set, VK_NULL_HANDLE, id.index);
+        this->vkDestroyAccelerationStructureKHR(this->vk_device, acceleration_structure_slot.vk_acceleration_structure, nullptr);
+        // Don't free, it will be freed since it's a normal resource
+        // cleanup_buffer(acceleration_structure_slot.buffer_id);
+        acceleration_structure_slot = {};
+        gpu_shader_resource_table.acceleration_structure_slots.return_slot(id);
     }
 
     ImplDevice::~ImplDevice() // NOLINT(bugprone-exception-escape)
@@ -1352,6 +1634,21 @@ namespace daxa
         this->main_queue_sampler_zombies.push_front({main_queue_cpu_timeline_value, id});
     }
 
+    void ImplDevice::zombify_acceleration_structure(AccelerationStructureId id)
+    {
+        DAXA_ONLY_IF_THREADSAFETY(std::unique_lock const lock{this->main_queue_zombies_mtx});
+        u64 const main_queue_cpu_timeline_value = DAXA_ATOMIC_FETCH(this->main_queue_cpu_timeline);
+        DAXA_DBG_ASSERT_TRUE_M(gpu_shader_resource_table.acceleration_structure_slots.dereference_id(id).zombie == false,
+                               "detected free after free - acceleration structure already is a zombie");
+        gpu_shader_resource_table.acceleration_structure_slots.dereference_id(id).zombie = true;
+        this->main_queue_acceleration_structure_zombies.push_front({main_queue_cpu_timeline_value, id});
+        auto buffer_id = gpu_shader_resource_table.acceleration_structure_slots.dereference_id(id).buffer_id;
+        DAXA_DBG_ASSERT_TRUE_M(gpu_shader_resource_table.buffer_slots.dereference_id(buffer_id).zombie == false,
+                               "detected free after free - buffer already is a zombie");
+        gpu_shader_resource_table.buffer_slots.dereference_id(buffer_id).zombie = true;
+        this->main_queue_buffer_zombies.push_front({main_queue_cpu_timeline_value, buffer_id});
+    }
+
     auto ImplDevice::slot(BufferId id) -> ImplBufferSlot &
     {
         return gpu_shader_resource_table.buffer_slots.dereference_id(id);
@@ -1372,6 +1669,11 @@ namespace daxa
         return gpu_shader_resource_table.sampler_slots.dereference_id(id);
     }
 
+    auto ImplDevice::slot(AccelerationStructureId id) -> ImplAccelerationStructureSlot &
+    {
+        return gpu_shader_resource_table.acceleration_structure_slots.dereference_id(id);
+    }
+
     auto ImplDevice::slot(BufferId id) const -> ImplBufferSlot const &
     {
         return gpu_shader_resource_table.buffer_slots.dereference_id(id);
@@ -1390,5 +1692,10 @@ namespace daxa
     auto ImplDevice::slot(SamplerId id) const -> ImplSamplerSlot const &
     {
         return gpu_shader_resource_table.sampler_slots.dereference_id(id);
+    }
+
+    auto ImplDevice::slot(AccelerationStructureId id) const -> ImplAccelerationStructureSlot const &
+    {
+        return gpu_shader_resource_table.acceleration_structure_slots.dereference_id(id);
     }
 } // namespace daxa

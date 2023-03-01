@@ -162,6 +162,7 @@ namespace daxa
         // TODO(grundlett): Remove these in favor of a more general solution
         bool enable_buffer_device_address_capture_replay = true;
         bool enable_conservative_rasterization = false;
+        bool enable_raytracing_api = false;
 
         std::string debug_name = {};
     };
@@ -190,12 +191,14 @@ namespace daxa
         auto create_image(ImageInfo const & info) -> ImageId;
         auto create_image_view(ImageViewInfo const & info) -> ImageViewId;
         auto create_sampler(SamplerInfo const & info) -> SamplerId;
+        auto create_acceleration_structure(AccelerationStructureInfo const & info) -> AccelerationStructureId;
         auto create_timeline_query_pool(TimelineQueryPoolInfo const & info) -> TimelineQueryPool;
 
         void destroy_buffer(BufferId id);
         void destroy_image(ImageId id);
         void destroy_image_view(ImageViewId id);
         void destroy_sampler(SamplerId id);
+        void destroy_acceleration_structure(AccelerationStructureId id);
 
         auto info_buffer(BufferId id) const -> BufferInfo;
         auto get_device_address(BufferId id) const -> BufferDeviceAddress;
@@ -208,6 +211,7 @@ namespace daxa
         auto info_image(ImageId id) const -> ImageInfo;
         auto info_image_view(ImageViewId id) const -> ImageViewInfo;
         auto info_sampler(SamplerId id) const -> SamplerInfo;
+        auto info_acceleration_structure(AccelerationStructureId id) const -> AccelerationStructureInfo;
 
         // auto create_pipeline_manager(PipelineManagerInfo const & info) -> PipelineManager;
         auto create_raster_pipeline(RasterPipelineInfo const & info) -> RasterPipeline;
@@ -230,6 +234,7 @@ namespace daxa
         auto is_id_valid(ImageId id) const -> bool;
         auto is_id_valid(BufferId id) const -> bool;
         auto is_id_valid(SamplerId id) const -> bool;
+        auto is_id_valid(AccelerationStructureId id) const -> bool;
 
       private:
         friend struct Context;

@@ -24,6 +24,17 @@ namespace daxa
 
         PFN_vkSetDebugUtilsObjectNameEXT vkSetDebugUtilsObjectNameEXT;
 
+        PFN_vkGetBufferDeviceAddressKHR vkGetBufferDeviceAddressKHR;
+        PFN_vkCreateAccelerationStructureKHR vkCreateAccelerationStructureKHR;
+        PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructureKHR;
+        PFN_vkGetAccelerationStructureBuildSizesKHR vkGetAccelerationStructureBuildSizesKHR;
+        PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR;
+        PFN_vkCmdBuildAccelerationStructuresKHR vkCmdBuildAccelerationStructuresKHR;
+        PFN_vkBuildAccelerationStructuresKHR vkBuildAccelerationStructuresKHR;
+        PFN_vkCmdTraceRaysKHR vkCmdTraceRaysKHR;
+        PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR;
+        PFN_vkCreateRayTracingPipelinesKHR vkCreateRayTracingPipelinesKHR;
+
         VmaAllocator vma_allocator = {};
         DeviceProperties vk_info = {};
         DeviceInfo info = {};
@@ -52,6 +63,7 @@ namespace daxa
         std::deque<std::pair<u64, ImageId>> main_queue_image_zombies = {};
         std::deque<std::pair<u64, ImageViewId>> main_queue_image_view_zombies = {};
         std::deque<std::pair<u64, SamplerId>> main_queue_sampler_zombies = {};
+        std::deque<std::pair<u64, AccelerationStructureId>> main_queue_acceleration_structure_zombies = {};
         std::deque<std::pair<u64, SemaphoreZombie>> main_queue_semaphore_zombies = {};
         std::deque<std::pair<u64, SplitBarrierZombie>> main_queue_split_barrier_zombies = {};
         std::deque<std::pair<u64, PipelineZombie>> main_queue_pipeline_zombies = {};
@@ -59,7 +71,7 @@ namespace daxa
         void main_queue_collect_garbage();
         void wait_idle() const;
 
-        ImplDevice(DeviceInfo info, DeviceProperties const & vk_info, ManagedWeakPtr impl_ctx, VkPhysicalDevice physical_device);
+        ImplDevice(DeviceInfo info, ManagedWeakPtr impl_ctx, VkPhysicalDevice physical_device);
         virtual ~ImplDevice() override final;
 
         auto validate_image_slice(ImageMipArraySlice const & slice, ImageId id) -> ImageMipArraySlice;
@@ -70,25 +82,30 @@ namespace daxa
         auto new_image(ImageInfo const & image_info) -> ImageId;
         auto new_image_view(ImageViewInfo const & image_view_info) -> ImageViewId;
         auto new_sampler(SamplerInfo const & sampler_info) -> SamplerId;
+        auto new_acceleration_structure(AccelerationStructureInfo const & acceleration_structure_info) -> AccelerationStructureId;
 
         auto slot(BufferId id) -> ImplBufferSlot &;
         auto slot(ImageId id) -> ImplImageSlot &;
         auto slot(ImageViewId id) -> ImplImageViewSlot &;
         auto slot(SamplerId id) -> ImplSamplerSlot &;
+        auto slot(AccelerationStructureId id) -> ImplAccelerationStructureSlot &;
 
         auto slot(BufferId id) const -> ImplBufferSlot const &;
         auto slot(ImageId id) const -> ImplImageSlot const &;
         auto slot(ImageViewId id) const -> ImplImageViewSlot const &;
         auto slot(SamplerId id) const -> ImplSamplerSlot const &;
+        auto slot(AccelerationStructureId id) const -> ImplAccelerationStructureSlot const &;
 
         void zombify_buffer(BufferId id);
         void zombify_image(ImageId id);
         void zombify_image_view(ImageViewId id);
         void zombify_sampler(SamplerId id);
+        void zombify_acceleration_structure(AccelerationStructureId id);
 
         void cleanup_buffer(BufferId id);
         void cleanup_image(ImageId id);
         void cleanup_image_view(ImageViewId id);
         void cleanup_sampler(SamplerId id);
+        void cleanup_acceleration_structure(AccelerationStructureId id);
     };
 } // namespace daxa

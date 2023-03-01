@@ -297,17 +297,22 @@ namespace daxa
 
     void CommandList::destroy_image_deferred(ImageId id)
     {
-        defer_destruction_helper(object, GPUResourceId{.index = id.index, .version = id.version}, DEFERRED_DESTRUCTION_IMAGE_INDEX);
+        defer_destruction_helper(this->object, GPUResourceId{.index = id.index, .version = id.version}, DEFERRED_DESTRUCTION_IMAGE_INDEX);
     }
 
     void CommandList::destroy_image_view_deferred(ImageViewId id)
     {
-        defer_destruction_helper(object, GPUResourceId{.index = id.index, .version = id.version}, DEFERRED_DESTRUCTION_IMAGE_VIEW_INDEX);
+        defer_destruction_helper(this->object, GPUResourceId{.index = id.index, .version = id.version}, DEFERRED_DESTRUCTION_IMAGE_VIEW_INDEX);
     }
 
     void CommandList::destroy_sampler_deferred(SamplerId id)
     {
-        defer_destruction_helper(object, GPUResourceId{.index = id.index, .version = id.version}, DEFERRED_DESTRUCTION_SAMPLER_INDEX);
+        defer_destruction_helper(this->object, GPUResourceId{.index = id.index, .version = id.version}, DEFERRED_DESTRUCTION_SAMPLER_INDEX);
+    }
+
+    void CommandList::destroy_acceleration_structure_deferred(AccelerationStructureId id)
+    {
+        defer_destruction_helper(this->object, GPUResourceId{.index = id.index, .version = id.version}, DEFERRED_DESTRUCTION_ACCELERATION_STRUCTURE_INDEX);
     }
 
     void CommandList::complete()
@@ -763,7 +768,7 @@ namespace daxa
 
         vkBeginCommandBuffer(this->vk_cmd_buffer, &vk_command_buffer_begin_info);
 
-        if (this->impl_device.as<ImplDevice>()->impl_ctx.as<ImplContext>()->enable_debug_names && this->info.debug_name.empty())
+        if (this->impl_device.as<ImplDevice>()->impl_ctx.as<ImplContext>()->enable_debug_names && !this->info.debug_name.empty())
         {
             auto cmd_buffer_name = this->info.debug_name + std::string(" [Daxa CommandBuffer]");
             VkDebugUtilsObjectNameInfoEXT const cmd_buffer_name_info{

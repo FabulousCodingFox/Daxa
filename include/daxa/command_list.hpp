@@ -221,6 +221,7 @@ namespace daxa
         void destroy_image_deferred(ImageId id);
         void destroy_image_view_deferred(ImageViewId id);
         void destroy_sampler_deferred(SamplerId id);
+        void destroy_acceleration_structure_deferred(AccelerationStructureId id);
 
         void begin_renderpass(RenderPassBeginInfo const & info);
         void end_renderpass();

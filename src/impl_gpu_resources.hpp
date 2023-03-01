@@ -11,6 +11,7 @@ namespace daxa
     static inline constexpr u32 SAMPLED_IMAGE_BINDING = 2;
     static inline constexpr u32 SAMPLER_BINDING = 3;
     static inline constexpr u32 BUFFER_DEVICE_ADDRESS_BUFFER_BINDING = 4;
+    static inline constexpr u32 ACCELERATION_STRUCTURE_BINDING = 5;
 
     struct ImplBufferSlot
     {
@@ -44,6 +45,14 @@ namespace daxa
     {
         SamplerInfo info = {};
         VkSampler vk_sampler = {};
+        bool zombie = {};
+    };
+
+    struct ImplAccelerationStructureSlot
+    {
+        AccelerationStructureInfo info = {};
+        VkAccelerationStructureKHR vk_acceleration_structure = {};
+        BufferId buffer_id = {};
         bool zombie = {};
     };
 
@@ -200,6 +209,7 @@ namespace daxa
         GpuShaderResourcePool<ImplBufferSlot> buffer_slots = {};
         GpuShaderResourcePool<ImplImageSlot> image_slots = {};
         GpuShaderResourcePool<ImplSamplerSlot> sampler_slots = {};
+        GpuShaderResourcePool<ImplAccelerationStructureSlot> acceleration_structure_slots = {};
 
         VkDescriptorSetLayout vk_descriptor_set_layout = {};
         VkDescriptorSet vk_descriptor_set = {};
@@ -209,7 +219,7 @@ namespace daxa
         // The first size is 0 word, second is 1 word, all others are a power of two (maximum is MAX_PUSH_CONSTANT_BYTE_SIZE).
         std::array<VkPipelineLayout, PIPELINE_LAYOUT_COUNT> pipeline_layouts = {};
 
-        void initialize(usize max_buffers, usize max_images, usize max_samplers, usize max_timeline_query_pools, VkDevice device, VkBuffer device_address_buffer);
+        void initialize(usize max_buffers, usize max_images, usize max_samplers, usize max_acceleration_structures, usize max_timeline_query_pools, VkDevice device, VkBuffer device_address_buffer);
         void cleanup(VkDevice device);
     };
 
@@ -218,4 +228,6 @@ namespace daxa
     void write_descriptor_set_buffer(VkDevice vk_device, VkDescriptorSet vk_descriptor_set, VkBuffer vk_buffer, VkDeviceSize offset, VkDeviceSize range, u32 index);
 
     void write_descriptor_set_image(VkDevice vk_device, VkDescriptorSet vk_descriptor_set, VkImageView vk_image_view, ImageUsageFlags usage, u32 index);
+
+    void write_descriptor_set_acceleration_structure(VkDevice vk_device, VkDescriptorSet vk_descriptor_set, VkAccelerationStructureKHR vk_acceleration_structure, u32 index);
 } // namespace daxa

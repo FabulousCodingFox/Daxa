@@ -853,7 +853,7 @@ namespace daxa
         MIRROR_CLAMP_TO_EDGE = 4,
     };
 
-    enum struct BorderColor 
+    enum struct BorderColor
     {
         FLOAT_TRANSPARENT_BLACK = 0,
         INT_TRANSPARENT_BLACK = 1,
@@ -1006,4 +1006,38 @@ namespace daxa
         u32 width = {};
         u32 height = {};
     };
+
+    enum struct AccelerationStructureType
+    {
+        TOP_LEVEL = 0,
+        BOTTOM_LEVEL = 1,
+        GENERIC = 2,
+    };
+
+    using HostOrDeviceAddress = std::variant<void *, BufferDeviceAddress>;
+
+    struct AccelerationStructureTriangleDataInfo
+    {
+        Format vertex_format = {};
+        HostOrDeviceAddress vertex_data = {};
+        u32 vertex_stride = {};
+        u32 max_vertex = {};
+        HostOrDeviceAddress index_data = {};
+        usize index_type_byte_size = {};
+        HostOrDeviceAddress transform_data = {};
+    };
+
+    struct AccelerationStructureAabbDataInfo
+    {
+        HostOrDeviceAddress data = {};
+        u32 stride = {};
+    };
+
+    struct AccelerationStructureInstanceDataInfo
+    {
+        bool array_of_pointers = {};
+        HostOrDeviceAddress data = {};
+    };
+
+    using AccelerationStructureDataInfo = std::variant<AccelerationStructureTriangleDataInfo, AccelerationStructureAabbDataInfo, AccelerationStructureInstanceDataInfo>;
 } // namespace daxa

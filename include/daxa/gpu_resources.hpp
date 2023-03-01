@@ -42,6 +42,10 @@ namespace daxa
         struct SamplerId : public GPUResourceId
         {
         };
+
+        struct AccelerationStructureId : public GPUResourceId
+        {
+        };
     } // namespace types
 
     auto to_string(types::ImageId image_id) -> std::string;
@@ -96,6 +100,14 @@ namespace daxa
         f32 max_lod = 1.0f;
         BorderColor border_color = BorderColor::FLOAT_TRANSPARENT_BLACK;
         bool enable_unnormalized_coordinates = false;
+        std::string debug_name = {};
+    };
+
+    struct AccelerationStructureInfo
+    {
+        AccelerationStructureType type = {};
+        AccelerationStructureDataInfo data_info = {};
+        u32 max_primitives = {};
         std::string debug_name = {};
     };
 } // namespace daxa
