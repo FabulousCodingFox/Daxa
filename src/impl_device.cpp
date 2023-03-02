@@ -841,7 +841,7 @@ namespace daxa
             this->info.max_allowed_buffers,
             this->info.max_allowed_images,
             this->info.max_allowed_samplers,
-            this->info.max_acceleration_structures,
+            this->info.max_allowed_acceleration_structures,
             vk_device,
             buffer_device_address_buffer);
     }
