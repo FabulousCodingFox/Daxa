@@ -1082,7 +1082,7 @@ namespace daxa
         {
             return 0;
         }
-        return deail::const_hash( str );
+        return detail::const_hash( str );
     }
 
     template<usize N>

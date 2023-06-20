@@ -127,6 +127,6 @@ namespace daxa
         AccelerationStructureType type = {};
         AccelerationStructureDataInfo data_info = {};
         u32 max_primitives = {};
-        std::string debug_name = {};
+        std::string name = {};
     };
 } // namespace daxa

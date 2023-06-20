@@ -24,7 +24,7 @@ namespace tests
                 .stride = sizeof(Aabb),
             },
             .max_primitives = 1,
-            .debug_name = APPNAME_PREFIX("simplest tlas"),
+            .name = APPNAME_PREFIX("simplest tlas"),
         });
         auto vertices = std::array{
             f32vec3{1.0f, 0.0f, 0.0f},
@@ -44,7 +44,7 @@ namespace tests
                 .transform_data = {}, // none
             },
             .max_primitives = 1,
-            .debug_name = APPNAME_PREFIX("simplest blas"),
+            .name = APPNAME_PREFIX("simplest blas"),
         });
         device.wait_idle();
         device.destroy_acceleration_structure(tlas_id);
@@ -60,7 +60,7 @@ auto main() -> int
     });
     daxa::Device device = daxa_ctx.create_device({
         .enable_raytracing_api = true,
-        .debug_name = APPNAME_PREFIX("device"),
+        .name = APPNAME_PREFIX("device"),
     });
 
     i32 ret = 0;

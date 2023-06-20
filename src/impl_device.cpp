@@ -1825,7 +1825,7 @@ namespace daxa
         // TODO: Manually create buffer?
         ret.buffer_id = new_buffer({
             .size = static_cast<u32>(acceleration_structure_build_sizes_info.accelerationStructureSize),
-            .debug_name = "temp",
+            .name = "temp",
         });
         ImplBufferSlot & buffer_slot = this->gpu_shader_resource_table.buffer_slots.dereference_id(ret.buffer_id);
 
@@ -1841,9 +1841,9 @@ namespace daxa
         };
         this->vkCreateAccelerationStructureKHR(this->vk_device, &vk_acceleration_structure_create_info, nullptr, &ret.vk_acceleration_structure);
 
-        if (this->impl_ctx.as<ImplContext>()->enable_debug_names && !acceleration_structure_info.debug_name.empty())
+        if (this->impl_ctx.as<ImplContext>()->enable_debug_names && !acceleration_structure_info.name.empty())
         {
-            auto const buffer_name = acceleration_structure_info.debug_name + std::string(" [Daxa Buffer]");
+            auto const buffer_name = acceleration_structure_info.name + std::string(" [Daxa Buffer]");
             VkDebugUtilsObjectNameInfoEXT const buffer_name_info{
                 .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
                 .pNext = nullptr,
