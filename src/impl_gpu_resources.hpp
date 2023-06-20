@@ -212,6 +212,7 @@ namespace daxa
         GpuShaderResourcePool<ImplAccelerationStructureSlot> acceleration_structure_slots = {};
 
         VkDescriptorSetLayout vk_descriptor_set_layout = {};
+        VkDescriptorSetLayout constant_buffer_binding_set_layout = {};
         VkDescriptorSet vk_descriptor_set = {};
         VkDescriptorPool vk_descriptor_pool = {};
 
@@ -219,7 +220,7 @@ namespace daxa
         // The first size is 0 word, second is 1 word, all others are a power of two (maximum is MAX_PUSH_CONSTANT_BYTE_SIZE).
         std::array<VkPipelineLayout, PIPELINE_LAYOUT_COUNT> pipeline_layouts = {};
 
-        void initialize(usize max_buffers, usize max_images, usize max_samplers, usize max_acceleration_structures, VkDevice device, VkBuffer device_address_buffer);
+        void initialize(usize max_buffers, usize max_images, usize max_samplers, usize max_acceleration_structures, VkDevice device, VkBuffer device_address_buffer, PFN_vkSetDebugUtilsObjectNameEXT vkSetDebugUtilsObjectNameEXT);
         void cleanup(VkDevice device);
     };
 

@@ -45,7 +45,7 @@ namespace daxa
                     static_cast<i64>(impl.cpu_frame_timeline) - static_cast<i64>(impl.info.max_allowed_frames_in_flight))));
         impl.acquire_semaphore_index = (impl.cpu_frame_timeline + 1) % impl.info.max_allowed_frames_in_flight;
         BinarySemaphore & acquire_semaphore = impl.acquire_semaphores[impl.acquire_semaphore_index];
-        VkResult err = vkAcquireNextImageKHR(
+        VkResult const err = vkAcquireNextImageKHR(
             impl.impl_device.as<ImplDevice>()->vk_device,
             impl.vk_swapchain, UINT64_MAX,
             acquire_semaphore.as<ImplBinarySemaphore>()->vk_semaphore,
@@ -65,7 +65,7 @@ namespace daxa
             // The swapchain needs recreation, we can only return a null ImageId here.
             return ImageId{};
         }
-        // We only bump the cpu timeline, when the aquire succedes.
+        // We only bump the cpu timeline, when the acquire succeeds.
         impl.cpu_frame_timeline += 1;
         return impl.images[impl.current_image_index];
     }
@@ -171,7 +171,7 @@ namespace daxa
     ImplSwapchain::ImplSwapchain(ManagedWeakPtr a_impl_device, SwapchainInfo a_info)
         : impl_device{std::move(a_impl_device)},
           info{std::move(a_info)},
-          gpu_frame_timeline{TimelineSemaphore{ManagedPtr(new ImplTimelineSemaphore{impl_device, TimelineSemaphoreInfo{.initial_value = 0, .debug_name = this->info.debug_name + " gpu timeline"}})}}
+          gpu_frame_timeline{TimelineSemaphore{ManagedPtr(new ImplTimelineSemaphore{impl_device, TimelineSemaphoreInfo{.initial_value = 0, .name = this->info.name + " gpu timeline"}})}}
     {
         recreate_surface();
 
@@ -203,7 +203,7 @@ namespace daxa
                 ManagedPtr(new ImplBinarySemaphore{
                     this->impl_device,
                     BinarySemaphoreInfo{
-                        .debug_name = this->info.debug_name + ", image " + std::to_string(i) + " acquire semaphore",
+                        .name = this->info.name + ", image " + std::to_string(i) + " acquire semaphore",
                     },
                 }),
             });
@@ -215,7 +215,7 @@ namespace daxa
                 ManagedPtr(new ImplBinarySemaphore{
                     this->impl_device,
                     BinarySemaphoreInfo{
-                        .debug_name = this->info.debug_name + ", image " + std::to_string(i) + " present semaphore",
+                        .name = this->info.name + ", image " + std::to_string(i) + " present semaphore",
                     },
                 }),
             });
@@ -251,7 +251,7 @@ namespace daxa
         // TODO: I (grundlett) am too lazy to find out why the other present modes
         // fail on Linux. This can be inspected by Linux people and they can
         // submit a PR if they find a fix.
-        info.present_mode = PresentMode::DO_NOT_WAIT_FOR_VBLANK;
+        info.present_mode = PresentMode::IMMEDIATE;
 #endif
 
         auto * old_swapchain = this->vk_swapchain;
@@ -308,15 +308,15 @@ namespace daxa
                 .format = static_cast<Format>(this->vk_surface_format.format),
                 .size = {this->surface_extent.x, this->surface_extent.y, 1},
                 .usage = usage,
-                .debug_name = this->info.debug_name + " Image #" + std::to_string(i),
+                .name = this->info.name + " Image #" + std::to_string(i),
             };
             this->images[i] = this->impl_device.as<ImplDevice>()->new_swapchain_image(
                 swapchain_images[i], vk_surface_format.format, i, usage, image_info);
         }
 
-        if (this->impl_device.as<ImplDevice>()->impl_ctx.as<ImplContext>()->enable_debug_names && !this->info.debug_name.empty())
+        if (this->impl_device.as<ImplDevice>()->impl_ctx.as<ImplContext>()->enable_debug_names && !this->info.name.empty())
         {
-            auto swapchain_name = this->info.debug_name + std::string(" [Daxa Swapchain]");
+            auto swapchain_name = this->info.name;
             VkDebugUtilsObjectNameInfoEXT const swapchain_name_info{
                 .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
                 .pNext = nullptr,

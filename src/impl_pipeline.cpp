@@ -33,8 +33,8 @@ namespace daxa
                 .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
                 .pNext = nullptr,
                 .flags = {},
-                .codeSize = static_cast<u32>(shader_info.binary.size() * sizeof(u32)),
-                .pCode = shader_info.binary.data(),
+                .codeSize = static_cast<u32>(shader_info.byte_code.size() * sizeof(u32)),
+                .pCode = shader_info.byte_code.data(),
             };
             vkCreateShaderModule(this->impl_device.as<ImplDevice>()->vk_device, &vk_shader_module_create_info, nullptr, &vk_shader_module);
             vk_shader_modules.push_back(vk_shader_module);
@@ -51,7 +51,18 @@ namespace daxa
         };
 
         create_shader_module(this->info.vertex_shader_info, VkShaderStageFlagBits::VK_SHADER_STAGE_VERTEX_BIT);
-        create_shader_module(this->info.fragment_shader_info, VkShaderStageFlagBits::VK_SHADER_STAGE_FRAGMENT_BIT);
+        if (this->info.tesselation_control_shader_info.has_value())
+        {
+            create_shader_module(this->info.tesselation_control_shader_info.value(), VkShaderStageFlagBits::VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT);
+        }
+        if (this->info.tesselation_evaluation_shader_info.has_value())
+        {
+            create_shader_module(this->info.tesselation_evaluation_shader_info.value(), VkShaderStageFlagBits::VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT);
+        }
+        if (this->info.fragment_shader_info.has_value())
+        {
+            create_shader_module(this->info.fragment_shader_info.value(), VkShaderStageFlagBits::VK_SHADER_STAGE_FRAGMENT_BIT);
+        }
 
         this->vk_pipeline_layout = this->impl_device.as<ImplDevice>()->gpu_shader_resource_table.pipeline_layouts.at((this->info.push_constant_size + 3) / 4);
         constexpr VkPipelineVertexInputStateCreateInfo vk_vertex_input_state{
@@ -70,6 +81,17 @@ namespace daxa
             .topology = *reinterpret_cast<VkPrimitiveTopology const *>(&info.raster.primitive_topology),
             .primitiveRestartEnable = static_cast<VkBool32>(info.raster.primitive_restart_enable),
         };
+        VkPipelineTessellationDomainOriginStateCreateInfo const vk_tesselation_domain_origin_state{
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_DOMAIN_ORIGIN_STATE_CREATE_INFO,
+            .pNext = nullptr,
+            .domainOrigin = *reinterpret_cast<VkTessellationDomainOrigin const *>(&info.tesselation.origin),
+        };
+        VkPipelineTessellationStateCreateInfo const vk_tesselation_state{
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO,
+            .pNext = reinterpret_cast<void const *>(&vk_tesselation_domain_origin_state),
+            .flags = {},
+            .patchControlPoints = info.tesselation.control_points,
+        };
         constexpr VkPipelineMultisampleStateCreateInfo vk_multisample_state{
             .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
             .pNext = nullptr,
@@ -86,7 +108,7 @@ namespace daxa
             .pNext = nullptr,
             .flags = {},
             .depthClampEnable = {},
-            .rasterizerDiscardEnable = {},
+            .rasterizerDiscardEnable = info.fragment_shader_info.has_value() ? VK_FALSE : VK_TRUE,
             .polygonMode = *reinterpret_cast<VkPolygonMode const *>(&info.raster.polygon_mode),
             .cullMode = *reinterpret_cast<VkCullModeFlags const *>(&info.raster.face_culling),
             .frontFace = *reinterpret_cast<VkFrontFace const *>(&info.raster.front_face_winding),
@@ -197,7 +219,7 @@ namespace daxa
             .pStages = vk_pipeline_shader_stage_create_infos.data(),
             .pVertexInputState = &vk_vertex_input_state,
             .pInputAssemblyState = &vk_input_assembly_state,
-            .pTessellationState = {},
+            .pTessellationState = &vk_tesselation_state,
             .pViewportState = &vk_viewport_state,
             .pRasterizationState = &vk_raster_state,
             .pMultisampleState = &vk_multisample_state,
@@ -223,9 +245,9 @@ namespace daxa
         {
             vkDestroyShaderModule(this->impl_device.as<ImplDevice>()->vk_device, vk_shader_module, nullptr);
         }
-        if (this->impl_device.as<ImplDevice>()->impl_ctx.as<ImplContext>()->enable_debug_names && !this->info.debug_name.empty())
+        if (this->impl_device.as<ImplDevice>()->impl_ctx.as<ImplContext>()->enable_debug_names && !this->info.name.empty())
         {
-            auto raster_pipeline_name = this->info.debug_name + std::string(" [Daxa RasterPipeline]");
+            auto raster_pipeline_name = this->info.name;
             VkDebugUtilsObjectNameInfoEXT const name_info{
                 .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
                 .pNext = nullptr,
@@ -245,8 +267,8 @@ namespace daxa
             .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
             .pNext = nullptr,
             .flags = {},
-            .codeSize = static_cast<u32>(this->info.shader_info.binary.size() * sizeof(u32)),
-            .pCode = this->info.shader_info.binary.data(),
+            .codeSize = static_cast<u32>(this->info.shader_info.byte_code.size() * sizeof(u32)),
+            .pCode = this->info.shader_info.byte_code.data(),
         };
         vkCreateShaderModule(this->impl_device.as<ImplDevice>()->vk_device, &shader_module_ci, nullptr, &vk_shader_module);
         this->vk_pipeline_layout = this->impl_device.as<ImplDevice>()->gpu_shader_resource_table.pipeline_layouts.at((this->info.push_constant_size + 3) / 4);
@@ -276,9 +298,9 @@ namespace daxa
             &this->vk_pipeline);
         DAXA_DBG_ASSERT_TRUE_M(pipeline_result == VK_SUCCESS, "failed to create compute pipeline");
         vkDestroyShaderModule(this->impl_device.as<ImplDevice>()->vk_device, vk_shader_module, nullptr);
-        if (this->impl_device.as<ImplDevice>()->impl_ctx.as<ImplContext>()->enable_debug_names && !info.debug_name.empty())
+        if (this->impl_device.as<ImplDevice>()->impl_ctx.as<ImplContext>()->enable_debug_names && !info.name.empty())
         {
-            auto raster_pipeline_name = this->info.debug_name + std::string(" [Daxa ComputePipeline]");
+            auto raster_pipeline_name = this->info.name;
             VkDebugUtilsObjectNameInfoEXT const name_info{
                 .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
                 .pNext = nullptr,

@@ -4,11 +4,11 @@
 
 namespace daxa
 {
-    using ShaderBinary = std::vector<u32>;
+    using ShaderByteCode = std::span<u32 const>;
 
     struct ShaderInfo
     {
-        ShaderBinary binary = {};
+        ShaderByteCode byte_code = {};
         std::optional<std::string> entry_point = {};
     };
 
@@ -16,7 +16,7 @@ namespace daxa
     {
         ShaderInfo shader_info = {};
         u32 push_constant_size = {};
-        std::string debug_name = {};
+        std::string name = {};
     };
 
     struct ComputePipeline : ManagedPtr
@@ -34,18 +34,11 @@ namespace daxa
     struct DepthTestInfo
     {
         Format depth_attachment_format = Format::UNDEFINED;
-        bool enable_depth_test = false;
-        bool enable_depth_write = false;
+        bool enable_depth_test = {};
+        bool enable_depth_write = {};
         CompareOp depth_test_compare_op = CompareOp::LESS_OR_EQUAL;
         f32 min_depth_bounds = 0.0f;
         f32 max_depth_bounds = 1.0f;
-    };
-
-    enum class ConservativeRasterizationMode
-    {
-        DISABLED = 0,
-        OVERESTIMATE = 1,
-        UNDERESTIMATE = 2,
     };
 
     struct ConservativeRasterInfo
@@ -57,13 +50,13 @@ namespace daxa
     struct RasterizerInfo
     {
         PrimitiveTopology primitive_topology = PrimitiveTopology::TRIANGLE_LIST;
-        bool primitive_restart_enable = false;
+        bool primitive_restart_enable = {};
         PolygonMode polygon_mode = PolygonMode::FILL;
         FaceCullFlags face_culling = FaceCullFlagBits::NONE;
         FrontFaceWinding front_face_winding = FrontFaceWinding::CLOCKWISE;
-        bool depth_clamp_enable = false;
-        bool rasterizer_discard_enable = false;
-        bool depth_bias_enable = false;
+        bool depth_clamp_enable = {};
+        bool rasterizer_discard_enable = {};
+        bool depth_bias_enable = {};
         f32 depth_bias_constant_factor = 0.0f;
         f32 depth_bias_clamp = 0.0f;
         f32 depth_bias_slope_factor = 0.0f;
@@ -77,15 +70,24 @@ namespace daxa
         BlendInfo blend = {};
     };
 
+    struct TesselationInfo
+    {
+        u32 control_points = 3;
+        TesselationDomainOrigin origin = {};
+    };
+
     struct RasterPipelineInfo
     {
         ShaderInfo vertex_shader_info = {};
-        ShaderInfo fragment_shader_info = {};
+        std::optional<ShaderInfo> tesselation_control_shader_info = {};
+        std::optional<ShaderInfo> tesselation_evaluation_shader_info = {};
+        std::optional<ShaderInfo> fragment_shader_info = {};
         std::vector<RenderAttachment> color_attachments = {};
         DepthTestInfo depth_test = {};
         RasterizerInfo raster = {};
+        TesselationInfo tesselation = {};
         u32 push_constant_size = {};
-        std::string debug_name = {};
+        std::string name = {};
     };
 
     struct RasterPipeline : ManagedPtr

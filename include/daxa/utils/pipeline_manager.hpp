@@ -19,7 +19,7 @@ namespace daxa
         std::string string;
     };
 
-    using ShaderSource = std::variant<std::monostate, ShaderFile, ShaderCode, ShaderBinary>;
+    using ShaderSource = std::variant<std::monostate, ShaderFile, ShaderCode, ShaderByteCode>;
 
     struct ShaderDefine
     {
@@ -31,6 +31,7 @@ namespace daxa
     {
         GLSL,
         HLSL,
+        MAX_ENUM = 0x7fffffff,
     };
 
     struct ShaderModel
@@ -61,25 +62,28 @@ namespace daxa
     {
         ShaderCompileInfo shader_info = {};
         u32 push_constant_size = {};
-        std::string debug_name = {};
+        std::string name = {};
     };
 
     struct RasterPipelineCompileInfo
     {
         ShaderCompileInfo vertex_shader_info = {};
-        ShaderCompileInfo fragment_shader_info = {};
+        std::optional<ShaderCompileInfo> tesselation_control_shader_info = {};
+        std::optional<ShaderCompileInfo> tesselation_evaluation_shader_info = {};
+        std::optional<ShaderCompileInfo> fragment_shader_info = {};
         std::vector<RenderAttachment> color_attachments = {};
         DepthTestInfo depth_test = {};
         RasterizerInfo raster = {};
+        TesselationInfo tesselation = {};
         u32 push_constant_size = {};
-        std::string debug_name = {};
+        std::string name = {};
     };
 
     struct PipelineManagerInfo
     {
         Device device;
         ShaderCompileOptions shader_compile_options = {};
-        std::string debug_name = {};
+        std::string name = {};
     };
 
     struct VirtualIncludeInfo
@@ -99,6 +103,6 @@ namespace daxa
         void remove_compute_pipeline(std::shared_ptr<ComputePipeline> const & pipeline);
         void remove_raster_pipeline(std::shared_ptr<RasterPipeline> const & pipeline);
         void add_virtual_include_file(VirtualIncludeInfo const & info);
-        auto reload_all() -> Result<bool>;
+        auto reload_all() -> std::optional<Result<void>>;
     };
 } // namespace daxa

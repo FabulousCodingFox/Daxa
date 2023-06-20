@@ -31,27 +31,27 @@ struct App : AppWindow<App>
         .enable_validation = true,
     });
     daxa::Device device = daxa_ctx.create_device({
-        .debug_name = APPNAME_PREFIX("device"),
+        .name = APPNAME_PREFIX("device"),
     });
 
     daxa::Swapchain swapchain = device.create_swapchain({
         .native_window = get_native_handle(),
         .native_window_platform = get_native_platform(),
-        .present_mode = daxa::PresentMode::DO_NOT_WAIT_FOR_VBLANK,
+        .present_mode = daxa::PresentMode::IMMEDIATE,
         .image_usage = daxa::ImageUsageFlagBits::TRANSFER_DST,
-        .debug_name = APPNAME_PREFIX("swapchain"),
+        .name = APPNAME_PREFIX("swapchain"),
     });
 
     daxa::PipelineManager pipeline_manager = daxa::PipelineManager({
         .device = device,
         .shader_compile_options = {
             .root_paths = {
+                DAXA_SHADER_INCLUDE_DIR,
                 "tests/3_samples/0_rectangle_cutting/shaders",
-                "include",
             },
             .language = daxa::ShaderLanguage::GLSL,
         },
-        .debug_name = APPNAME_PREFIX("pipeline_manager"),
+        .name = APPNAME_PREFIX("pipeline_manager"),
     });
 
     daxa::ImGuiRenderer imgui_renderer = create_imgui_renderer();
@@ -67,8 +67,8 @@ struct App : AppWindow<App>
 
     // clang-format off
     std::shared_ptr<daxa::RasterPipeline> raster_pipeline = pipeline_manager.add_raster_pipeline({
-        .vertex_shader_info = {.source = daxa::ShaderFile{"draw.glsl"}, .compile_options = {.defines = {daxa::ShaderDefine{"DRAW_VERT"}}}},
-        .fragment_shader_info = {.source = daxa::ShaderFile{"draw.glsl"}, .compile_options = {.defines = {daxa::ShaderDefine{"DRAW_FRAG"}}}},
+        .vertex_shader_info = daxa::ShaderCompileInfo{.source = daxa::ShaderFile{"draw.glsl"}},
+        .fragment_shader_info = daxa::ShaderCompileInfo{.source = daxa::ShaderFile{"draw.glsl"}},
         .color_attachments = {{
             .format = swapchain.get_format(),
             .blend = {
@@ -81,13 +81,13 @@ struct App : AppWindow<App>
         }},
         .raster = {},
         .push_constant_size = sizeof(DrawPush),
-        .debug_name = APPNAME_PREFIX("raster_pipeline"),
+        .name = APPNAME_PREFIX("raster_pipeline"),
     }).value();
     // clang-format on
 
     daxa::BufferId vertex_buffer = device.create_buffer(daxa::BufferInfo{
         .size = sizeof(DrawVertex) * MAX_VERTS,
-        .debug_name = APPNAME_PREFIX("vertex_buffer"),
+        .name = APPNAME_PREFIX("vertex_buffer"),
     });
     u32 vert_n = 0;
 
@@ -232,21 +232,21 @@ struct App : AppWindow<App>
         ui_update();
 
         auto reloaded_result = pipeline_manager.reload_all();
-        if (reloaded_result.is_err())
+        if (reloaded_result.has_value())
         {
-            std::cout << reloaded_result.to_string() << std::endl;
+            std::cout << reloaded_result.value().to_string() << std::endl;
         }
 
         auto swapchain_image = swapchain.acquire_next_image();
 
         auto cmd_list = device.create_command_list({
-            .debug_name = APPNAME_PREFIX("cmd_list"),
+            .name = APPNAME_PREFIX("cmd_list"),
         });
 
         auto vertex_staging_buffer = device.create_buffer({
-            .memory_flags = daxa::MemoryFlagBits::HOST_ACCESS_RANDOM,
             .size = sizeof(DrawVertex) * MAX_VERTS,
-            .debug_name = APPNAME_PREFIX("vertex_staging_buffer"),
+            .allocate_info = daxa::MemoryFlagBits::HOST_ACCESS_RANDOM,
+            .name = APPNAME_PREFIX("vertex_staging_buffer"),
         });
         cmd_list.destroy_buffer_deferred(vertex_staging_buffer);
 
@@ -254,8 +254,8 @@ struct App : AppWindow<App>
         construct_scene(buffer_ptr);
 
         cmd_list.pipeline_barrier({
-            .awaited_pipeline_access = daxa::AccessConsts::HOST_WRITE,
-            .waiting_pipeline_access = daxa::AccessConsts::TRANSFER_READ,
+            .src_access = daxa::AccessConsts::HOST_WRITE,
+            .dst_access = daxa::AccessConsts::TRANSFER_READ,
         });
 
         cmd_list.copy_buffer_to_buffer({
@@ -265,14 +265,14 @@ struct App : AppWindow<App>
         });
 
         cmd_list.pipeline_barrier({
-            .awaited_pipeline_access = daxa::AccessConsts::TRANSFER_WRITE,
-            .waiting_pipeline_access = daxa::AccessConsts::VERTEX_SHADER_READ,
+            .src_access = daxa::AccessConsts::TRANSFER_WRITE,
+            .dst_access = daxa::AccessConsts::VERTEX_SHADER_READ,
         });
 
         cmd_list.pipeline_barrier_image_transition({
-            .waiting_pipeline_access = daxa::AccessConsts::COLOR_ATTACHMENT_OUTPUT_WRITE,
-            .before_layout = daxa::ImageLayout::UNDEFINED,
-            .after_layout = daxa::ImageLayout::ATTACHMENT_OPTIMAL,
+            .dst_access = daxa::AccessConsts::COLOR_ATTACHMENT_OUTPUT_WRITE,
+            .src_layout = daxa::ImageLayout::UNDEFINED,
+            .dst_layout = daxa::ImageLayout::ATTACHMENT_OPTIMAL,
             .image_id = swapchain_image,
         });
 
@@ -290,9 +290,9 @@ struct App : AppWindow<App>
         imgui_renderer.record_commands(ImGui::GetDrawData(), cmd_list, swapchain_image, size_x, size_y);
 
         cmd_list.pipeline_barrier_image_transition({
-            .awaited_pipeline_access = daxa::AccessConsts::ALL_GRAPHICS_READ_WRITE,
-            .before_layout = daxa::ImageLayout::ATTACHMENT_OPTIMAL,
-            .after_layout = daxa::ImageLayout::PRESENT_SRC,
+            .src_access = daxa::AccessConsts::ALL_GRAPHICS_READ_WRITE,
+            .src_layout = daxa::ImageLayout::ATTACHMENT_OPTIMAL,
+            .dst_layout = daxa::ImageLayout::PRESENT_SRC,
             .image_id = swapchain_image,
         });
 

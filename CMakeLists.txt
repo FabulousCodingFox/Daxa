@@ -17,6 +17,9 @@ endif()
 if(DAXA_ENABLE_UTILS_PIPELINE_MANAGER_DXC)
     list(APPEND VCPKG_MANIFEST_FEATURES "utils-pipeline-manager-dxc")
 endif()
+if(DAXA_ENABLE_UTILS_PIPELINE_MANAGER_SPIRV_VALIDATION)
+    list(APPEND VCPKG_MANIFEST_FEATURES "utils-pipeline-manager-spirv-validation")
+endif()
 if(DAXA_ENABLE_UTILS_TASK_LIST)
     list(APPEND VCPKG_MANIFEST_FEATURES "utils-task-list")
 endif()
@@ -65,6 +68,7 @@ add_library(daxa STATIC
     "src/impl_dependencies.cpp"
     "src/impl_split_barrier.cpp"
     "src/impl_timeline_query.cpp"
+    "src/impl_memory_block.cpp"
 
     "src/utils/impl_task_list.cpp"
     "src/utils/impl_imgui.cpp"
@@ -80,8 +84,11 @@ target_compile_features(daxa PUBLIC cxx_std_20)
 find_package(unofficial-vulkan-memory-allocator CONFIG REQUIRED)
 find_package(Vulkan REQUIRED)
 
+include(GNUInstallDirs)
+
 target_compile_definitions(daxa
     PUBLIC
+    $<BUILD_INTERFACE:DAXA_SHADER_INCLUDE_DIR="${CMAKE_CURRENT_LIST_DIR}/include">
     DAXA_SHADERLANG_GLSL=1
     DAXA_SHADERLANG_HLSL=2
 )
@@ -140,6 +147,17 @@ if(DAXA_ENABLE_UTILS_PIPELINE_MANAGER_DXC)
         dxc::dxc
     )
 endif()
+if(DAXA_ENABLE_UTILS_PIPELINE_MANAGER_SPIRV_VALIDATION)
+    target_compile_definitions(daxa
+        PUBLIC
+        DAXA_BUILT_WITH_UTILS_PIPELINE_MANAGER_SPIRV_VALIDATION=true
+    )
+    find_package(SPIRV-Tools CONFIG REQUIRED)
+    target_link_libraries(daxa
+        PUBLIC
+        SPIRV-Tools-static
+    )
+endif()
 if(DAXA_ENABLE_UTILS_TASK_LIST)
     target_compile_definitions(daxa
         PUBLIC
@@ -153,7 +171,6 @@ target_link_libraries(daxa
     Vulkan::Vulkan
 )
 
-include(GNUInstallDirs)
 target_include_directories(daxa
     PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>
@@ -199,6 +216,11 @@ file(WRITE ${CMAKE_BINARY_DIR}/config.cmake.in [=[
 include(${CMAKE_CURRENT_LIST_DIR}/daxa-targets.cmake)
 check_required_components(daxa)
 
+get_target_property(DAXA_PREV_DEFINITIONS daxa::daxa INTERFACE_COMPILE_DEFINITIONS)
+set_target_properties(daxa::daxa PROPERTIES
+  INTERFACE_COMPILE_DEFINITIONS "${DAXA_PREV_DEFINITIONS};DAXA_SHADER_INCLUDE_DIR=\"${PACKAGE_PREFIX_DIR}/include\""
+)
+
 find_package(unofficial-vulkan-memory-allocator CONFIG REQUIRED)
 find_package(Vulkan REQUIRED)
 ]=])
@@ -225,6 +247,11 @@ endif()
 if(DAXA_ENABLE_UTILS_PIPELINE_MANAGER_DXC)
     file(APPEND ${CMAKE_BINARY_DIR}/config.cmake.in [=[
 find_package(dxc CONFIG REQUIRED)
+]=])
+endif()
+if(DAXA_ENABLE_UTILS_PIPELINE_MANAGER_SPIRV_VALIDATION)
+    file(APPEND ${CMAKE_BINARY_DIR}/config.cmake.in [=[
+find_package(SPIRV-Tools CONFIG REQUIRED)
 ]=])
 endif()
 if(DAXA_ENABLE_UTILS_TASK_LIST)

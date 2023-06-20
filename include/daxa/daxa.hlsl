@@ -138,17 +138,6 @@ namespace daxa
     }
 } // namespace daxa
 
-#define DAXA_DECL_BUFFER_STRUCT(Type, BODY)                                                                  \
-    struct Type BODY;                                                                                        \
-    namespace daxa                                                                                           \
-    {                                                                                                        \
-        [[vk::binding(DAXA_STORAGE_BUFFER_BINDING, 0)]] StructuredBuffer<Type> StructuredBufferView##Type[]; \
-        template <>                                                                                          \
-        StructuredBuffer<Type> get_StructuredBuffer(daxa_BufferId buffer_id)                                 \
-        {                                                                                                    \
-            return StructuredBufferView##Type[DAXA_ID_INDEX_MASK & buffer_id.buffer_id_value];               \
-        }                                                                                                    \
-    }
 #define DAXA_DEFINE_GET_RWSTRUCTURED_BUFFER(Type, BODY)                                                          \
     struct Type BODY;                                                                                            \
     namespace daxa                                                                                               \
@@ -264,10 +253,13 @@ DAXA_DEFINE_GET_RWTEXTURE2D(float4)
 DAXA_DEFINE_GET_RWTEXTURE2D(daxa_u32)
 DAXA_DEFINE_GET_RWTEXTURE2D(daxa_u32vec4)
 
-#if !defined(DAXA_ENABLE_SHADER_NO_NAMESPACE)
-#define DAXA_ENABLE_SHADER_NO_NAMESPACE 0
-#endif
 #if DAXA_ENABLE_SHADER_NO_NAMESPACE
+#define BufferId daxa_BufferId
+#define ImageViewId daxa_ImageViewId
+#define SamplerId daxa_SamplerId
+#endif
+
+#if DAXA_ENABLE_SHADER_NO_NAMESPACE_PRIMITIVES
 #define b32vec1 daxa_b32vec1
 #define b32vec2 daxa_b32vec2
 #define b32vec3 daxa_b32vec3

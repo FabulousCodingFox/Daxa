@@ -6,6 +6,143 @@ namespace daxa
 {
     Device::Device(ManagedPtr impl) : ManagedPtr(std::move(impl)) {}
 
+    static VkBufferUsageFlags const BUFFER_USE_FLAGS =
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+        VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT |
+        VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT |
+        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+        VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+        VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
+        VK_BUFFER_USAGE_TRANSFORM_FEEDBACK_BUFFER_BIT_EXT |
+        VK_BUFFER_USAGE_TRANSFORM_FEEDBACK_COUNTER_BUFFER_BIT_EXT |
+        VK_BUFFER_USAGE_CONDITIONAL_RENDERING_BIT_EXT |
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+        VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR;
+
+    auto initialize_image_create_info_from_image_info(ImageInfo const & image_info, u32 const * queue_family_index_ptr) -> VkImageCreateInfo
+    {
+        DAXA_DBG_ASSERT_TRUE_M(std::popcount(image_info.sample_count) == 1 && image_info.sample_count <= 64, "image samples must be power of two and between 1 and 64(inclusive)");
+        DAXA_DBG_ASSERT_TRUE_M(
+            image_info.size.x > 0 &&
+                image_info.size.y > 0 &&
+                image_info.size.z > 0,
+            "image (x,y,z) dimensions must be greater then 0");
+        DAXA_DBG_ASSERT_TRUE_M(image_info.array_layer_count > 0, "image array layer count must be greater then 0");
+        DAXA_DBG_ASSERT_TRUE_M(image_info.mip_level_count > 0, "image mip level count must be greater then 0");
+
+        auto const vk_image_type = static_cast<VkImageType>(image_info.dimensions - 1);
+
+        VkImageCreateFlags vk_image_create_flags = {};
+
+        constexpr auto CUBE_FACE_N = 6u;
+        if (image_info.dimensions == 2 && image_info.size.x == image_info.size.y && image_info.array_layer_count % CUBE_FACE_N == 0)
+        {
+            vk_image_create_flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+        }
+        if (image_info.dimensions == 3)
+        {
+            // TODO(grundlett): Figure out if there are cases where a 3D image CAN'T be used
+            // as a 2D array image view.
+            vk_image_create_flags |= VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT;
+        }
+
+        VkImageCreateInfo const vk_image_create_info{
+            .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = vk_image_create_flags,
+            .imageType = vk_image_type,
+            .format = static_cast<VkFormat>(image_info.format),
+            .extent = std::bit_cast<VkExtent3D>(image_info.size),
+            .mipLevels = image_info.mip_level_count,
+            .arrayLayers = image_info.array_layer_count,
+            .samples = static_cast<VkSampleCountFlagBits>(image_info.sample_count),
+            .tiling = VK_IMAGE_TILING_OPTIMAL,
+            .usage = image_info.usage.data,
+            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+            .queueFamilyIndexCount = 1,
+            .pQueueFamilyIndices = queue_family_index_ptr,
+            .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        };
+        return vk_image_create_info;
+    }
+
+    auto Device::create_memory(MemoryBlockInfo const & info) -> MemoryBlock
+    {
+        auto const & impl = *as<ImplDevice>();
+
+        DAXA_DBG_ASSERT_TRUE_M(info.requirements.memory_type_bits != 0, "memory_type_bits must be non zero");
+
+        VkMemoryRequirements requirements = std::bit_cast<VkMemoryRequirements>(info.requirements);
+        VmaAllocationCreateFlags const flags = std::bit_cast<VmaAllocationCreateFlags>(info.flags);
+        VmaAllocationCreateInfo create_info{
+            .flags = flags,
+            .usage = VMA_MEMORY_USAGE_GPU_ONLY,
+            .requiredFlags = {}, // idk what this is...
+            .preferredFlags = {},
+            .memoryTypeBits = {}, // idk what this is....
+            .pool = {},
+            .pUserData = {},
+            .priority = 0.5f,
+        };
+        VmaAllocation allocation = {};
+        VmaAllocationInfo allocation_info = {};
+        vmaAllocateMemory(impl.vma_allocator, &requirements, &create_info, &allocation, &allocation_info);
+
+        return MemoryBlock{ManagedPtr{new ImplMemoryBlock(this->make_weak(), info, allocation, allocation_info)}};
+    }
+
+    auto Device::get_memory_requirements(BufferInfo const & info) -> MemoryRequirements
+    {
+        auto const & impl = *as<ImplDevice>();
+        VkBufferCreateInfo const vk_buffer_create_info{
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = {},
+            .size = static_cast<VkDeviceSize>(info.size),
+            .usage = BUFFER_USE_FLAGS,
+            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+            .queueFamilyIndexCount = 1,
+            .pQueueFamilyIndices = &impl.main_queue_family_index,
+        };
+        VkDeviceBufferMemoryRequirements buffer_requirement_info{
+            .sType = VK_STRUCTURE_TYPE_DEVICE_BUFFER_MEMORY_REQUIREMENTS,
+            .pNext = {},
+            .pCreateInfo = &vk_buffer_create_info,
+        };
+        VkMemoryRequirements2 mem_requirements = {
+            .sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2,
+            .pNext = {},
+            .memoryRequirements = {},
+        };
+        vkGetDeviceBufferMemoryRequirements(impl.vk_device, &buffer_requirement_info, &mem_requirements);
+        MemoryRequirements ret = std::bit_cast<MemoryRequirements>(mem_requirements.memoryRequirements);
+        return ret;
+    }
+
+    auto Device::get_memory_requirements(ImageInfo const & info) -> MemoryRequirements
+    {
+        auto const & impl = *as<ImplDevice>();
+        VkImageCreateInfo vk_image_create_info = initialize_image_create_info_from_image_info(info, &impl.main_queue_family_index);
+        VkDeviceImageMemoryRequirements image_requirement_info{
+            .sType = VK_STRUCTURE_TYPE_DEVICE_IMAGE_MEMORY_REQUIREMENTS,
+            .pNext = {},
+            .pCreateInfo = &vk_image_create_info,
+        };
+        VkMemoryRequirements2 mem_requirements{
+            .sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2,
+            .pNext = {},
+            .memoryRequirements = {},
+        };
+        vkGetDeviceImageMemoryRequirements(impl.vk_device, &image_requirement_info, &mem_requirements);
+        MemoryRequirements ret = std::bit_cast<MemoryRequirements>(mem_requirements.memoryRequirements);
+        return ret;
+    }
+
     auto Device::info() const -> DeviceInfo const &
     {
         auto const & impl = *as<ImplDevice>();
@@ -153,7 +290,7 @@ namespace daxa
             .pResults = {},
         };
 
-        [[maybe_unused]] VkResult err = vkQueuePresentKHR(impl.main_queue_vk_queue, &present_info);
+        [[maybe_unused]] VkResult const err = vkQueuePresentKHR(impl.main_queue_vk_queue, &present_info);
         // We currently ignore VK_ERROR_OUT_OF_DATE_KHR, VK_ERROR_SURFACE_LOST_KHR and VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT
         // because supposedly these kinds of things are not specified within the spec. This is also handled in Swapchain::acquire_next_image()
         DAXA_DBG_ASSERT_TRUE_M(err == VK_SUCCESS || err == VK_ERROR_OUT_OF_DATE_KHR || err == VK_ERROR_SURFACE_LOST_KHR || err == VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT, "Daxa should never be in a situation where Present fails");
@@ -273,6 +410,7 @@ namespace daxa
     auto Device::info_buffer(BufferId id) const -> BufferInfo
     {
         auto const & impl = *as<ImplDevice>();
+        DAXA_DBG_ASSERT_TRUE_M(is_id_valid(id), "detected invalid buffer id");
         return impl.slot(id).info;
     }
 
@@ -286,26 +424,29 @@ namespace daxa
     {
         auto const & impl = *as<ImplDevice>();
         DAXA_DBG_ASSERT_TRUE_M(
-            (impl.slot(id).info.memory_flags & (MemoryFlagBits::HOST_ACCESS_RANDOM | MemoryFlagBits::HOST_ACCESS_SEQUENTIAL_WRITE)) != MemoryFlagBits::NONE,
-            "host buffer address is only available if the buffer is created with eithr of the following memory flags: HOST_ACCESS_RANDOM, HOST_ACCESS_SEQUENTIAL_WRITE");
+            impl.slot(id).host_address != nullptr,
+            "host buffer address is only available if the buffer is created with either of the following memory flags: HOST_ACCESS_RANDOM, HOST_ACCESS_SEQUENTIAL_WRITE");
         return impl.slot(id).host_address;
     }
 
     auto Device::info_image(ImageId id) const -> ImageInfo
     {
         auto const & impl = *as<ImplDevice>();
+        DAXA_DBG_ASSERT_TRUE_M(is_id_valid(id), "detected invalid image id");
         return impl.slot(id).info;
     }
 
     auto Device::info_image_view(ImageViewId id) const -> ImageViewInfo
     {
         auto const & impl = *as<ImplDevice>();
+        DAXA_DBG_ASSERT_TRUE_M(is_id_valid(id), "detected invalid image view id");
         return impl.slot(id).info;
     }
 
     auto Device::info_sampler(SamplerId id) const -> SamplerInfo
     {
         auto const & impl = *as<ImplDevice>();
+        DAXA_DBG_ASSERT_TRUE_M(is_id_valid(id), "detected invalid sampler id");
         return impl.slot(id).info;
     }
 
@@ -316,6 +457,12 @@ namespace daxa
     }
 
     auto Device::is_id_valid(ImageId id) const -> bool
+    {
+        auto const & impl = *as<ImplDevice>();
+        return !id.is_empty() && impl.gpu_shader_resource_table.image_slots.is_id_valid(id);
+    }
+
+    auto Device::is_id_valid(ImageViewId id) const -> bool
     {
         auto const & impl = *as<ImplDevice>();
         return !id.is_empty() && impl.gpu_shader_resource_table.image_slots.is_id_valid(id);
@@ -396,13 +543,13 @@ namespace daxa
             .robustBufferAccess = VK_FALSE,
             .fullDrawIndexUint32 = VK_FALSE,
             .imageCubeArray = VK_TRUE,
-            .independentBlend = VK_FALSE,
+            .independentBlend = VK_TRUE,
             .geometryShader = VK_FALSE,
-            .tessellationShader = VK_FALSE,
+            .tessellationShader = VK_TRUE,
             .sampleRateShading = VK_FALSE,
             .dualSrcBlend = VK_FALSE,
             .logicOp = VK_FALSE,
-            .multiDrawIndirect = VK_TRUE, // Very usefull for gpu driven rendering
+            .multiDrawIndirect = VK_TRUE, // Very useful for gpu driven rendering
             .drawIndirectFirstInstance = VK_FALSE,
             .depthClamp = VK_FALSE,
             .depthBiasClamp = VK_FALSE,
@@ -423,7 +570,7 @@ namespace daxa
             .shaderTessellationAndGeometryPointSize = VK_FALSE,
             .shaderImageGatherExtended = VK_FALSE,
             .shaderStorageImageExtendedFormats = VK_FALSE,
-            .shaderStorageImageMultisample = VK_TRUE,            // Usefull for software vrs.
+            .shaderStorageImageMultisample = VK_TRUE,            // Useful for software vrs.
             .shaderStorageImageReadWithoutFormat = VK_TRUE,      // This allows daxa shaders to not specify image layout for image binding tables and read ops.
             .shaderStorageImageWriteWithoutFormat = VK_TRUE,     // This allows daxa shaders to not specify image layout for image binding tables and write ops.
             .shaderUniformBufferArrayDynamicIndexing = VK_FALSE, // This is superseded by descriptor indexing.
@@ -483,7 +630,7 @@ namespace daxa
             .descriptorBindingUpdateUnusedWhilePending = VK_TRUE, // Needed for bindless table updates.
             .descriptorBindingPartiallyBound = VK_TRUE,           // Needed for sparse binding in bindless table.
             .descriptorBindingVariableDescriptorCount = VK_FALSE,
-            .runtimeDescriptorArray = VK_TRUE, // Allows shaders to not have a hardcoded descriptor maximum per talbe.
+            .runtimeDescriptorArray = VK_TRUE, // Allows shaders to not have a hardcoded descriptor maximum per table.
         };
         REQUIRED_DEVICE_FEATURE_P_CHAIN = reinterpret_cast<void *>(&REQUIRED_PHYSICAL_DEVICE_FEATURES_DESCRIPTOR_INDEXING);
 
@@ -531,15 +678,6 @@ namespace daxa
         };
         REQUIRED_DEVICE_FEATURE_P_CHAIN = reinterpret_cast<void *>(&REQUIRED_PHYSICAL_DEVICE_FEATURES_SYNCHRONIZATION_2);
 
-        VkPhysicalDeviceRobustness2FeaturesEXT REQUIRED_PHYSICAL_DEVICE_FEATURES_ROBUSTNESS_2{
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT,
-            .pNext = REQUIRED_DEVICE_FEATURE_P_CHAIN,
-            .robustBufferAccess2 = {},
-            .robustImageAccess2 = {},
-            .nullDescriptor = VK_TRUE,
-        };
-        REQUIRED_DEVICE_FEATURE_P_CHAIN = reinterpret_cast<void *>(&REQUIRED_PHYSICAL_DEVICE_FEATURES_ROBUSTNESS_2);
-
         VkPhysicalDeviceScalarBlockLayoutFeatures REQUIRED_PHYSICAL_DEVICE_FEATURES_SCALAR_LAYOUT{
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES,
             .pNext = REQUIRED_DEVICE_FEATURE_P_CHAIN,
@@ -557,7 +695,7 @@ namespace daxa
         extension_names.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
         extension_names.push_back(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
         extension_names.push_back(VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME); // might be a problem, intel does not support it at all.
-        // extension_names.push_back(VK_EXT_MULTI_DRAW_EXTENSION_NAME);
+        extension_names.push_back(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
 
         if (this->info.enable_conservative_rasterization)
         {
@@ -620,6 +758,9 @@ namespace daxa
         vkCreateDevice(a_physical_device, &device_ci, nullptr, &this->vk_device);
 
         this->vkSetDebugUtilsObjectNameEXT = reinterpret_cast<PFN_vkSetDebugUtilsObjectNameEXT>(vkGetDeviceProcAddr(this->vk_device, "vkSetDebugUtilsObjectNameEXT"));
+        this->vkCmdBeginDebugUtilsLabelEXT = reinterpret_cast<PFN_vkCmdBeginDebugUtilsLabelEXT>(vkGetDeviceProcAddr(this->vk_device, "vkCmdBeginDebugUtilsLabelEXT"));
+        this->vkCmdEndDebugUtilsLabelEXT = reinterpret_cast<PFN_vkCmdEndDebugUtilsLabelEXT>(vkGetDeviceProcAddr(this->vk_device, "vkCmdEndDebugUtilsLabelEXT"));
+        this->vkCmdPushDescriptorSetKHR = reinterpret_cast<PFN_vkCmdPushDescriptorSetKHR>(vkGetDeviceProcAddr(this->vk_device, "vkCmdPushDescriptorSetKHR"));
 
         if (this->info.enable_raytracing_api)
         {
@@ -636,6 +777,35 @@ namespace daxa
         }
 
         vkGetDeviceQueue(this->vk_device, this->main_queue_family_index, 0, &this->main_queue_vk_queue);
+
+        VkCommandPool init_cmd_pool = {};
+        VkCommandBuffer init_cmd_buffer = {};
+        VkCommandPoolCreateInfo const vk_command_pool_create_info{
+            .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+            .queueFamilyIndex = this->main_queue_family_index,
+        };
+
+        vkCreateCommandPool(this->vk_device, &vk_command_pool_create_info, nullptr, &init_cmd_pool);
+
+        VkCommandBufferAllocateInfo const vk_command_buffer_allocate_info{
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+            .pNext = nullptr,
+            .commandPool = init_cmd_pool,
+            .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+            .commandBufferCount = 1,
+        };
+
+        vkAllocateCommandBuffers(this->vk_device, &vk_command_buffer_allocate_info, &init_cmd_buffer);
+
+        VkCommandBufferBeginInfo const vk_command_buffer_begin_info{
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+            .pNext = nullptr,
+            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+            .pInheritanceInfo = {},
+        };
+        vkBeginCommandBuffer(init_cmd_buffer, &vk_command_buffer_begin_info);
 
         VkSemaphoreTypeCreateInfo timeline_ci{
             .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
@@ -659,7 +829,7 @@ namespace daxa
                 " buffers, the device supports up to " +
                 std::to_string(this->vk_info.limits.max_descriptor_set_storage_buffers) +
                 "buffers.");
-        auto const max_device_supported_images_in_set = std::min(this->vk_info.limits.max_descriptor_set_sampled_images, this->vk_info.limits.max_descriptor_set_storage_images);
+        [[maybe_unused]] auto const max_device_supported_images_in_set = std::min(this->vk_info.limits.max_descriptor_set_sampled_images, this->vk_info.limits.max_descriptor_set_storage_images);
         DAXA_DBG_ASSERT_TRUE_M(
             this->info.max_allowed_images <= max_device_supported_images_in_set,
             std::string("device does not support ") +
@@ -736,67 +906,199 @@ namespace daxa
 
         vmaCreateAllocator(&vma_allocator_create_info, &this->vma_allocator);
 
-        // Images and buffers can be set to be a null descriptor.
-        // Null descriptors are no available for samples, but we still want to have one to overwrite dead resources with.
-        // So we create a default sampler that acts as the "null sampler".
-        VkSamplerCreateInfo const vk_sampler_create_info{
-            .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-            .pNext = nullptr,
-            .flags = {},
-            .magFilter = VkFilter::VK_FILTER_LINEAR,
-            .minFilter = VkFilter::VK_FILTER_LINEAR,
-            .mipmapMode = VkSamplerMipmapMode::VK_SAMPLER_MIPMAP_MODE_LINEAR,
-            .addressModeU = VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-            .addressModeV = VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-            .addressModeW = VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-            .mipLodBias = 0.0f,
-            .anisotropyEnable = VK_FALSE,
-            .maxAnisotropy = 0,
-            .compareEnable = VK_FALSE,
-            .compareOp = VkCompareOp::VK_COMPARE_OP_ALWAYS,
-            .minLod = 0,
-            .maxLod = 0,
-            .borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK,
-            .unnormalizedCoordinates = VK_FALSE,
-        };
-        vkCreateSampler(vk_device, &vk_sampler_create_info, nullptr, &this->vk_null_sampler);
+        {
+            auto buffer_data = std::array<u8, 4>{0xff, 0x00, 0xff, 0xff};
 
-        VkBufferUsageFlags const usage_flags =
-            VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-            VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+            VkBufferCreateInfo const vk_buffer_create_info{
+                .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                .pNext = nullptr,
+                .flags = {},
+                .size = static_cast<VkDeviceSize>(sizeof(u8) * 4),
+                .usage = BUFFER_USE_FLAGS,
+                .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+                .queueFamilyIndexCount = 1,
+                .pQueueFamilyIndices = &this->main_queue_family_index,
+            };
 
-        VkBufferCreateInfo const vk_buffer_create_info{
-            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-            .pNext = nullptr,
-            .flags = {},
-            .size = this->info.max_allowed_buffers * sizeof(u64),
-            .usage = usage_flags,
-            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-            .queueFamilyIndexCount = 1,
-            .pQueueFamilyIndices = &this->main_queue_family_index,
-        };
+            VmaAllocationInfo vma_allocation_info = {};
 
-        VmaAllocationCreateInfo const vma_allocation_create_info{
-            .flags = static_cast<VmaAllocationCreateFlags>(VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT),
-            .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
-            .requiredFlags = {},
-            .preferredFlags = {},
-            .memoryTypeBits = std::numeric_limits<u32>::max(),
-            .pool = nullptr,
-            .pUserData = nullptr,
-            .priority = 0.5f,
-        };
+            auto vma_allocation_flags = static_cast<VmaAllocationCreateFlags>(
+                VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT |
+                VMA_ALLOCATION_CREATE_MAPPED_BIT |
+                VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT);
+
+            VmaAllocationCreateInfo const vma_allocation_create_info{
+                .flags = vma_allocation_flags,
+                .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
+                .requiredFlags = {},
+                .preferredFlags = {},
+                .memoryTypeBits = std::numeric_limits<u32>::max(),
+                .pool = nullptr,
+                .pUserData = nullptr,
+                .priority = 0.5f,
+            };
+
+            [[maybe_unused]] VkResult const vk_create_buffer_result = vmaCreateBuffer(this->vma_allocator, &vk_buffer_create_info, &vma_allocation_create_info, &this->vk_null_buffer, &this->vk_null_buffer_vma_allocation, &vma_allocation_info);
+            DAXA_DBG_ASSERT_TRUE_M(vk_create_buffer_result == VK_SUCCESS, "failed to create vk null buffer");
+
+            *static_cast<decltype(buffer_data) *>(vma_allocation_info.pMappedData) = buffer_data;
+        }
 
         {
-            [[maybe_unused]] VkResult result = vmaCreateBuffer(this->vma_allocator, &vk_buffer_create_info, &vma_allocation_create_info, &buffer_device_address_buffer, &buffer_device_address_buffer_allocation, nullptr);
+            auto image_info = ImageInfo{
+                .dimensions = 2,
+                .format = Format::R8G8B8A8_UNORM,
+                .aspect = ImageAspectFlagBits::COLOR,
+                .size = {1, 1, 1},
+                .mip_level_count = 1,
+                .array_layer_count = 1,
+                .sample_count = 1,
+                .usage = ImageUsageFlagBits::SHADER_READ_ONLY | ImageUsageFlagBits::SHADER_READ_WRITE | ImageUsageFlagBits::TRANSFER_DST,
+                .allocate_info = MemoryFlagBits::DEDICATED_MEMORY,
+            };
+            VkImageCreateInfo const vk_image_create_info = initialize_image_create_info_from_image_info(image_info, &this->main_queue_family_index);
+
+            VmaAllocationCreateInfo const vma_allocation_create_info{
+                .flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT,
+                .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
+                .requiredFlags = {},
+                .preferredFlags = {},
+                .memoryTypeBits = std::numeric_limits<u32>::max(),
+                .pool = nullptr,
+                .pUserData = nullptr,
+                .priority = 0.5f,
+            };
+
+            [[maybe_unused]] VkResult const vk_create_image_result = vmaCreateImage(this->vma_allocator, &vk_image_create_info, &vma_allocation_create_info, &this->vk_null_image, &this->vk_null_image_vma_allocation, nullptr);
+            DAXA_DBG_ASSERT_TRUE_M(vk_create_image_result == VK_SUCCESS, "failed to create vk null image");
+
+            VkImageViewCreateInfo const vk_image_view_create_info{
+                .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                .pNext = nullptr,
+                .flags = {},
+                .image = this->vk_null_image,
+                .viewType = VK_IMAGE_VIEW_TYPE_2D,
+                .format = *reinterpret_cast<VkFormat const *>(&image_info.format),
+                .components = VkComponentMapping{
+                    .r = VK_COMPONENT_SWIZZLE_IDENTITY,
+                    .g = VK_COMPONENT_SWIZZLE_IDENTITY,
+                    .b = VK_COMPONENT_SWIZZLE_IDENTITY,
+                    .a = VK_COMPONENT_SWIZZLE_IDENTITY,
+                },
+                .subresourceRange = {
+                    .aspectMask = static_cast<VkImageAspectFlags>(image_info.aspect.data),
+                    .baseMipLevel = 0,
+                    .levelCount = image_info.mip_level_count,
+                    .baseArrayLayer = 0,
+                    .layerCount = image_info.array_layer_count,
+                },
+            };
+
+            [[maybe_unused]] VkResult const vk_create_image_view_result = vkCreateImageView(vk_device, &vk_image_view_create_info, nullptr, &this->vk_null_image_view);
+            DAXA_DBG_ASSERT_TRUE_M(vk_create_image_view_result == VK_SUCCESS, "failed to create vk null image view");
+
+            VkImageMemoryBarrier vk_image_mem_barrier = {
+                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                .pNext = {},
+                .srcAccessMask = VK_ACCESS_HOST_WRITE_BIT,
+                .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+                .oldLayout = {},
+                .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .image = vk_null_image,
+                .subresourceRange = {
+                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                    .baseMipLevel = 0,
+                    .levelCount = 1,
+                    .baseArrayLayer = 0,
+                    .layerCount = 1,
+                },
+            };
+            vkCmdPipelineBarrier(init_cmd_buffer, VK_PIPELINE_STAGE_HOST_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, {}, {}, {}, {}, {}, 1, &vk_image_mem_barrier);
+            VkBufferImageCopy const vk_buffer_image_copy{
+                .bufferOffset = 0u,
+                .bufferRowLength = 0u,
+                .bufferImageHeight = 0u,
+                .imageSubresource = {
+                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                    .mipLevel = 0,
+                    .baseArrayLayer = 0,
+                    .layerCount = 1,
+                },
+                .imageOffset = VkOffset3D{0, 0, 0},
+                .imageExtent = VkExtent3D{1, 1, 1},
+            };
+            vkCmdCopyBufferToImage(init_cmd_buffer, vk_null_buffer, vk_null_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &vk_buffer_image_copy);
+            vk_image_mem_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            vk_image_mem_barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+            vk_image_mem_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            vk_image_mem_barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL,
+            vk_image_mem_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            vk_image_mem_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            vkCmdPipelineBarrier(init_cmd_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, {}, {}, {}, {}, {}, 1, &vk_image_mem_barrier);
+        }
+
+        {
+            VkSamplerCreateInfo const vk_sampler_create_info{
+                .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+                .pNext = nullptr,
+                .flags = {},
+                .magFilter = VkFilter::VK_FILTER_LINEAR,
+                .minFilter = VkFilter::VK_FILTER_LINEAR,
+                .mipmapMode = VkSamplerMipmapMode::VK_SAMPLER_MIPMAP_MODE_LINEAR,
+                .addressModeU = VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                .addressModeV = VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                .addressModeW = VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                .mipLodBias = 0.0f,
+                .anisotropyEnable = VK_FALSE,
+                .maxAnisotropy = 0,
+                .compareEnable = VK_FALSE,
+                .compareOp = VkCompareOp::VK_COMPARE_OP_ALWAYS,
+                .minLod = 0,
+                .maxLod = 0,
+                .borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK,
+                .unnormalizedCoordinates = VK_FALSE,
+            };
+            vkCreateSampler(vk_device, &vk_sampler_create_info, nullptr, &this->vk_null_sampler);
+        }
+
+        {
+            VkBufferUsageFlags const usage_flags =
+                VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+
+            VkBufferCreateInfo const vk_buffer_create_info{
+                .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                .pNext = nullptr,
+                .flags = {},
+                .size = this->info.max_allowed_buffers * sizeof(u64),
+                .usage = usage_flags,
+                .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+                .queueFamilyIndexCount = 1,
+                .pQueueFamilyIndices = &this->main_queue_family_index,
+            };
+
+            VmaAllocationCreateInfo const vma_allocation_create_info{
+                .flags = static_cast<VmaAllocationCreateFlags>(VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT),
+                .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
+                .requiredFlags = {},
+                .preferredFlags = {},
+                .memoryTypeBits = std::numeric_limits<u32>::max(),
+                .pool = nullptr,
+                .pUserData = nullptr,
+                .priority = 0.5f,
+            };
+
+            [[maybe_unused]] VkResult const result = vmaCreateBuffer(this->vma_allocator, &vk_buffer_create_info, &vma_allocation_create_info, &buffer_device_address_buffer, &buffer_device_address_buffer_allocation, nullptr);
             vmaMapMemory(this->vma_allocator, this->buffer_device_address_buffer_allocation, reinterpret_cast<void **>(&this->buffer_device_address_buffer_host_ptr));
             DAXA_DBG_ASSERT_TRUE_M(result == VK_SUCCESS, "failed to create buffer");
         }
 
-        if (this->impl_ctx.as<ImplContext>()->enable_debug_names && !this->info.debug_name.empty())
+        if (this->impl_ctx.as<ImplContext>()->enable_debug_names && !this->info.name.empty())
         {
-            auto const device_name = this->info.debug_name + std::string(" [Daxa Device]");
+            auto const device_name = this->info.name;
             VkDebugUtilsObjectNameInfoEXT const device_name_info{
                 .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
                 .pNext = nullptr,
@@ -806,7 +1108,7 @@ namespace daxa
             };
             this->vkSetDebugUtilsObjectNameEXT(vk_device, &device_name_info);
 
-            auto const queue_name = this->info.debug_name + std::string(" [Daxa Device Queue]");
+            auto const queue_name = this->info.name;
             VkDebugUtilsObjectNameInfoEXT const device_main_queue_name_info{
                 .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
                 .pNext = nullptr,
@@ -816,7 +1118,7 @@ namespace daxa
             };
             this->vkSetDebugUtilsObjectNameEXT(vk_device, &device_main_queue_name_info);
 
-            auto const semaphore_name = this->info.debug_name + std::string(" [Daxa Device TimelineSemaphore]");
+            auto const semaphore_name = this->info.name;
             VkDebugUtilsObjectNameInfoEXT const device_main_queue_timeline_semaphore_name_info{
                 .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
                 .pNext = nullptr,
@@ -826,7 +1128,7 @@ namespace daxa
             };
             this->vkSetDebugUtilsObjectNameEXT(vk_device, &device_main_queue_timeline_semaphore_name_info);
 
-            auto const buffer_name = this->info.debug_name + std::string(" [Daxa Device buffer device address buffer]");
+            auto const buffer_name = this->info.name;
             VkDebugUtilsObjectNameInfoEXT const device_main_queue_timeline_buffer_device_address_buffer_name_info{
                 .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
                 .pNext = nullptr,
@@ -843,7 +1145,27 @@ namespace daxa
             this->info.max_allowed_samplers,
             this->info.max_allowed_acceleration_structures,
             vk_device,
-            buffer_device_address_buffer);
+            buffer_device_address_buffer,
+            vkSetDebugUtilsObjectNameEXT);
+
+        vkEndCommandBuffer(init_cmd_buffer);
+        // Submit initial commands to set up the daxa device.
+        constexpr VkPipelineStageFlags wait_stage_mask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+        VkSubmitInfo init_submit{
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            .pNext = {},
+            .waitSemaphoreCount = {},
+            .pWaitSemaphores = {},
+            .pWaitDstStageMask = &wait_stage_mask,
+            .commandBufferCount = 1,
+            .pCommandBuffers = &init_cmd_buffer,
+            .signalSemaphoreCount = {},
+            .pSignalSemaphores = {},
+        };
+        vkQueueSubmit(this->main_queue_vk_queue, 1, &init_submit, {});
+        // Wait for commands in from the init cmd list to complete.
+        vkDeviceWaitIdle(this->vk_device);
+        vkDestroyCommandPool(this->vk_device, init_cmd_pool, {});
     }
 
     void ImplDevice::main_queue_collect_garbage()
@@ -947,63 +1269,64 @@ namespace daxa
     {
         auto [id, ret] = gpu_shader_resource_table.buffer_slots.new_slot();
 
-        DAXA_DBG_ASSERT_TRUE_M(buffer_info.size > 0, "can not create buffers of size zero");
+        DAXA_DBG_ASSERT_TRUE_M(buffer_info.size > 0, "can not create buffers with size zero");
 
         ret.info = buffer_info;
-
-        VkBufferUsageFlags const usage_flags =
-            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-            VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-            VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-            VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT |
-            VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT |
-            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
-            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-            VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
-            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
-            VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
-            VK_BUFFER_USAGE_TRANSFORM_FEEDBACK_BUFFER_BIT_EXT |
-            VK_BUFFER_USAGE_TRANSFORM_FEEDBACK_COUNTER_BUFFER_BIT_EXT |
-            VK_BUFFER_USAGE_CONDITIONAL_RENDERING_BIT_EXT |
-            VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-            VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
-            VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR;
 
         VkBufferCreateInfo const vk_buffer_create_info{
             .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
             .pNext = nullptr,
             .flags = {},
-            .size = static_cast<VkDeviceSize>(buffer_info.size),
-            .usage = usage_flags,
+            .size = static_cast<VkDeviceSize>(buffer_info.size) + 4 /* Workaround for gpuav bugs related to bda oob access. */, // TODO: Remove this 'workaround'. It's fixed in the newest SDK
+            .usage = BUFFER_USE_FLAGS,
             .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
             .queueFamilyIndexCount = 1,
             .pQueueFamilyIndices = &this->main_queue_family_index,
         };
 
-        bool host_accessable = false;
-        auto vma_allocation_flags = static_cast<VmaAllocationCreateFlags>(buffer_info.memory_flags.data);
-        if (((vma_allocation_flags & VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT) != 0u) ||
-            ((vma_allocation_flags & VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT) != 0u) ||
-            ((vma_allocation_flags & VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT) != 0u))
-        {
-            vma_allocation_flags |= VMA_ALLOCATION_CREATE_MAPPED_BIT;
-            host_accessable = true;
-        }
-
+        bool host_accessible = false;
         VmaAllocationInfo vma_allocation_info = {};
+        if (AutoAllocInfo const * auto_info = std::get_if<AutoAllocInfo>(&buffer_info.allocate_info))
+        {
+            auto vma_allocation_flags = static_cast<VmaAllocationCreateFlags>(auto_info->data);
+            if (((vma_allocation_flags & VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT) != 0u) ||
+                ((vma_allocation_flags & VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT) != 0u) ||
+                ((vma_allocation_flags & VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT) != 0u))
+            {
+                vma_allocation_flags |= VMA_ALLOCATION_CREATE_MAPPED_BIT;
+                host_accessible = true;
+            }
 
-        VmaAllocationCreateInfo const vma_allocation_create_info{
-            .flags = vma_allocation_flags,
-            .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
-            .requiredFlags = {},
-            .preferredFlags = {},
-            .memoryTypeBits = std::numeric_limits<u32>::max(),
-            .pool = nullptr,
-            .pUserData = nullptr,
-            .priority = 0.5f,
-        };
+            VmaAllocationCreateInfo const vma_allocation_create_info{
+                .flags = vma_allocation_flags,
+                .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
+                .requiredFlags = {},
+                .preferredFlags = {},
+                .memoryTypeBits = std::numeric_limits<u32>::max(),
+                .pool = nullptr,
+                .pUserData = nullptr,
+                .priority = 0.5f,
+            };
 
-        vmaCreateBuffer(this->vma_allocator, &vk_buffer_create_info, &vma_allocation_create_info, &ret.vk_buffer, &ret.vma_allocation, &vma_allocation_info);
+            [[maybe_unused]] VkResult const vk_create_buffer_result = vmaCreateBuffer(this->vma_allocator, &vk_buffer_create_info, &vma_allocation_create_info, &ret.vk_buffer, &ret.vma_allocation, &vma_allocation_info);
+            DAXA_DBG_ASSERT_TRUE_M(vk_create_buffer_result == VK_SUCCESS, "failed to create buffer");
+        }
+        else
+        {
+            ManualAllocInfo const & manual_info = std::get<ManualAllocInfo>(buffer_info.allocate_info);
+            ImplMemoryBlock const & mem_block = *manual_info.memory_block.as<ImplMemoryBlock const>();
+
+            // TODO(pahrens): Add validation for memory type requirements.
+
+            vkCreateBuffer(this->vk_device, &vk_buffer_create_info, nullptr, &ret.vk_buffer);
+
+            vmaBindBufferMemory2(
+                this->vma_allocator,
+                mem_block.allocation,
+                manual_info.offset,
+                ret.vk_buffer,
+                {});
+        }
 
         VkBufferDeviceAddressInfo const vk_buffer_device_address_info{
             .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
@@ -1013,14 +1336,14 @@ namespace daxa
 
         ret.device_address = vkGetBufferDeviceAddress(vk_device, &vk_buffer_device_address_info);
 
-        ret.host_address = host_accessable ? vma_allocation_info.pMappedData : nullptr;
+        ret.host_address = host_accessible ? vma_allocation_info.pMappedData : nullptr;
         ret.zombie = false;
 
         this->buffer_device_address_buffer_host_ptr[id.index] = ret.device_address;
 
-        if (this->impl_ctx.as<ImplContext>()->enable_debug_names && !buffer_info.debug_name.empty())
+        if (this->impl_ctx.as<ImplContext>()->enable_debug_names && !buffer_info.name.empty())
         {
-            auto const buffer_name = buffer_info.debug_name + std::string(" [Daxa Buffer]");
+            auto const buffer_name = buffer_info.name;
             VkDebugUtilsObjectNameInfoEXT const buffer_name_info{
                 .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
                 .pNext = nullptr,
@@ -1073,6 +1396,20 @@ namespace daxa
 
         ImplImageSlot ret;
         ret.vk_image = swapchain_image;
+        ret.view_slot.info = ImageViewInfo{
+            .type = static_cast<ImageViewType>(image_info.dimensions - 1),
+            .format = image_info.format,
+            .image = {id},
+            .slice = ImageMipArraySlice{
+                .image_aspect = image_info.aspect,
+                .base_mip_level = 0,
+                .level_count = image_info.mip_level_count,
+                .base_array_layer = 0,
+                .layer_count = image_info.array_layer_count,
+            },
+            .name = image_info.name,
+        };
+
         VkImageViewCreateInfo const view_ci{
             .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
             .pNext = nullptr,
@@ -1098,9 +1435,9 @@ namespace daxa
         ret.info = image_info;
         vkCreateImageView(vk_device, &view_ci, nullptr, &ret.view_slot.vk_image_view);
 
-        if (this->impl_ctx.as<ImplContext>()->enable_debug_names && !image_info.debug_name.empty())
+        if (this->impl_ctx.as<ImplContext>()->enable_debug_names && !image_info.name.empty())
         {
-            auto swapchain_image_name = image_info.debug_name + std::string(" [Daxa Swapchain Image]");
+            auto swapchain_image_name = image_info.name;
             VkDebugUtilsObjectNameInfoEXT const swapchain_image_name_info{
                 .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
                 .pNext = nullptr,
@@ -1110,7 +1447,7 @@ namespace daxa
             };
             this->vkSetDebugUtilsObjectNameEXT(this->vk_device, &swapchain_image_name_info);
 
-            auto swapchain_image_view_name = image_info.debug_name + std::string(" [Daxa Swapchain ImageView]");
+            auto swapchain_image_view_name = image_info.name;
             VkDebugUtilsObjectNameInfoEXT const swapchain_image_view_name_info{
                 .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
                 .pNext = nullptr,
@@ -1132,11 +1469,13 @@ namespace daxa
     {
         auto [id, image_slot_variant] = gpu_shader_resource_table.image_slots.new_slot();
 
+        DAXA_DBG_ASSERT_TRUE_M(image_info.dimensions >= 1 && image_info.dimensions <= 3, "image dimensions must be a value between 1 to 3(inclusive)");
+
         ImplImageSlot ret = {};
         ret.zombie = false;
         ret.info = image_info;
         ret.view_slot.info = ImageViewInfo{
-            .type = static_cast<ImageViewType>(image_info.dimensions),
+            .type = static_cast<ImageViewType>(image_info.dimensions - 1),
             .format = image_info.format,
             .image = {id},
             .slice = ImageMipArraySlice{
@@ -1146,66 +1485,41 @@ namespace daxa
                 .base_array_layer = 0,
                 .layer_count = image_info.array_layer_count,
             },
-            .debug_name = image_info.debug_name,
+            .name = image_info.name,
         };
 
-        DAXA_DBG_ASSERT_TRUE_M(image_info.dimensions >= 1 && image_info.dimensions <= 3, "image dimensions must be a value between 1 to 3(inclusive)");
-        DAXA_DBG_ASSERT_TRUE_M(std::popcount(image_info.sample_count) == 1 && image_info.sample_count <= 64, "image samples must be power of two and between 1 and 64(inclusive)");
-        DAXA_DBG_ASSERT_TRUE_M(
-            image_info.size.x > 0 &&
-                image_info.size.y > 0 &&
-                image_info.size.z > 0,
-            "image (x,y,z) dimensions must be greater then 0");
-        DAXA_DBG_ASSERT_TRUE_M(image_info.array_layer_count > 0, "image array layer count must be greater then 0");
-        DAXA_DBG_ASSERT_TRUE_M(image_info.mip_level_count > 0, "image mip level count must be greater then 0");
+        VkImageCreateInfo const vk_image_create_info = initialize_image_create_info_from_image_info(image_info, &this->main_queue_family_index);
 
-        auto const vk_image_type = static_cast<VkImageType>(image_info.dimensions - 1);
-
-        VkImageCreateFlags vk_image_create_flags = {};
-
-        constexpr auto CUBE_FACE_N = 6u;
-        if (image_info.dimensions == 2 && image_info.size.x == image_info.size.y && image_info.array_layer_count % CUBE_FACE_N == 0)
+        if (AutoAllocInfo const * auto_info = std::get_if<AutoAllocInfo>(&image_info.allocate_info))
         {
-            vk_image_create_flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+            VmaAllocationCreateInfo const vma_allocation_create_info{
+                .flags = static_cast<VmaAllocationCreateFlags>(auto_info->data),
+                .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
+                .requiredFlags = {},
+                .preferredFlags = {},
+                .memoryTypeBits = std::numeric_limits<u32>::max(),
+                .pool = nullptr,
+                .pUserData = nullptr,
+                .priority = 0.5f,
+            };
+
+            [[maybe_unused]] VkResult const vk_create_image_result = vmaCreateImage(this->vma_allocator, &vk_image_create_info, &vma_allocation_create_info, &ret.vk_image, &ret.vma_allocation, nullptr);
+            DAXA_DBG_ASSERT_TRUE_M(vk_create_image_result == VK_SUCCESS, "failed to create image");
         }
-        if (image_info.dimensions == 3)
+        else
         {
-            // TODO(grundlett): Figure out if there are cases where a 3D image CAN'T be used
-            // as a 2D array image view.
-            vk_image_create_flags |= VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT;
+            ManualAllocInfo const & manual_info = std::get<ManualAllocInfo>(image_info.allocate_info);
+            ImplMemoryBlock const & mem_block = *manual_info.memory_block.as<ImplMemoryBlock const>();
+            // TODO(pahrens): Add validation for memory requirements.
+            [[maybe_unused]] VkResult const vk_create_image_result = vkCreateImage(this->vk_device, &vk_image_create_info, nullptr, &ret.vk_image);
+            DAXA_DBG_ASSERT_TRUE_M(vk_create_image_result == VK_SUCCESS, "failed to create image");
+            vmaBindImageMemory2(
+                this->vma_allocator,
+                mem_block.allocation,
+                manual_info.offset,
+                ret.vk_image,
+                {});
         }
-
-        VkImageCreateInfo const vk_image_create_info{
-            .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-            .pNext = nullptr,
-            .flags = vk_image_create_flags,
-            .imageType = vk_image_type,
-            .format = *reinterpret_cast<VkFormat const *>(&image_info.format),
-            .extent = *reinterpret_cast<VkExtent3D const *>(&image_info.size),
-            .mipLevels = image_info.mip_level_count,
-            .arrayLayers = image_info.array_layer_count,
-            .samples = static_cast<VkSampleCountFlagBits>(image_info.sample_count),
-            .tiling = VK_IMAGE_TILING_OPTIMAL,
-            .usage = image_info.usage.data,
-            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-            .queueFamilyIndexCount = 1,
-            .pQueueFamilyIndices = &this->main_queue_family_index,
-            .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-        };
-
-        VmaAllocationCreateInfo const vma_allocation_create_info{
-            .flags = static_cast<VmaAllocationCreateFlags>(image_info.memory_flags.data),
-            .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
-            .requiredFlags = {},
-            .preferredFlags = {},
-            .memoryTypeBits = std::numeric_limits<u32>::max(),
-            .pool = nullptr,
-            .pUserData = nullptr,
-            .priority = 0.5f,
-        };
-
-        [[maybe_unused]] VkResult vk_create_image_result = vmaCreateImage(this->vma_allocator, &vk_image_create_info, &vma_allocation_create_info, &ret.vk_image, &ret.vma_allocation, nullptr);
-        DAXA_DBG_ASSERT_TRUE_M(vk_create_image_result == VK_SUCCESS, "failed to create image");
 
         VkImageViewType vk_image_view_type = {};
         if (image_info.array_layer_count > 1)
@@ -1240,12 +1554,12 @@ namespace daxa
             },
         };
 
-        [[maybe_unused]] VkResult vk_create_image_view_result = vkCreateImageView(vk_device, &vk_image_view_create_info, nullptr, &ret.view_slot.vk_image_view);
+        [[maybe_unused]] VkResult const vk_create_image_view_result = vkCreateImageView(vk_device, &vk_image_view_create_info, nullptr, &ret.view_slot.vk_image_view);
         DAXA_DBG_ASSERT_TRUE_M(vk_create_image_view_result == VK_SUCCESS, "failed to create image view");
 
-        if (this->impl_ctx.as<ImplContext>()->enable_debug_names && !info.debug_name.empty())
+        if (this->impl_ctx.as<ImplContext>()->enable_debug_names && !info.name.empty())
         {
-            auto image_name = image_info.debug_name + std::string(" [Daxa Image]");
+            auto image_name = image_info.name;
             VkDebugUtilsObjectNameInfoEXT const swapchain_image_name_info{
                 .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
                 .pNext = nullptr,
@@ -1255,7 +1569,7 @@ namespace daxa
             };
             this->vkSetDebugUtilsObjectNameEXT(this->vk_device, &swapchain_image_name_info);
 
-            auto image_view_name = image_info.debug_name + std::string(" [Daxa ImageView]");
+            auto image_view_name = image_info.name;
             VkDebugUtilsObjectNameInfoEXT const swapchain_image_view_name_info{
                 .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
                 .pNext = nullptr,
@@ -1303,12 +1617,12 @@ namespace daxa
             .subresourceRange = *reinterpret_cast<VkImageSubresourceRange const *>(&slice),
         };
 
-        [[maybe_unused]] VkResult result = vkCreateImageView(vk_device, &vk_image_view_create_info, nullptr, &ret.vk_image_view);
+        [[maybe_unused]] VkResult const result = vkCreateImageView(vk_device, &vk_image_view_create_info, nullptr, &ret.vk_image_view);
         DAXA_DBG_ASSERT_TRUE_M(result == VK_SUCCESS, "failed to create image view");
 
-        if (this->impl_ctx.as<ImplContext>()->enable_debug_names && !image_view_info.debug_name.empty())
+        if (this->impl_ctx.as<ImplContext>()->enable_debug_names && !image_view_info.name.empty())
         {
-            auto image_view_name = image_view_info.debug_name + std::string(" [Daxa ImageView]");
+            auto image_view_name = image_view_info.name;
             VkDebugUtilsObjectNameInfoEXT const name_info{
                 .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
                 .pNext = nullptr,
@@ -1362,12 +1676,12 @@ namespace daxa
             .unnormalizedCoordinates = static_cast<VkBool32>(sampler_info.enable_unnormalized_coordinates),
         };
 
-        [[maybe_unused]] VkResult result = vkCreateSampler(this->vk_device, &vk_sampler_create_info, nullptr, &ret.vk_sampler);
+        [[maybe_unused]] VkResult const result = vkCreateSampler(this->vk_device, &vk_sampler_create_info, nullptr, &ret.vk_sampler);
         DAXA_DBG_ASSERT_TRUE_M(result == VK_SUCCESS, "failed to create sampler");
 
-        if (this->impl_ctx.as<ImplContext>()->enable_debug_names && !info.debug_name.empty())
+        if (this->impl_ctx.as<ImplContext>()->enable_debug_names && !info.name.empty())
         {
-            auto sampler_name = info.debug_name + std::string(" [Daxa Image]");
+            auto sampler_name = info.name;
             VkDebugUtilsObjectNameInfoEXT const sampler_name_info{
                 .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
                 .pNext = nullptr,
@@ -1556,8 +1870,15 @@ namespace daxa
     {
         ImplBufferSlot & buffer_slot = this->gpu_shader_resource_table.buffer_slots.dereference_id(id);
         this->buffer_device_address_buffer_host_ptr[id.index] = 0;
-        write_descriptor_set_buffer(this->vk_device, this->gpu_shader_resource_table.vk_descriptor_set, VK_NULL_HANDLE, 0, VK_WHOLE_SIZE, id.index);
-        vmaDestroyBuffer(this->vma_allocator, buffer_slot.vk_buffer, buffer_slot.vma_allocation);
+        write_descriptor_set_buffer(this->vk_device, this->gpu_shader_resource_table.vk_descriptor_set, this->vk_null_buffer, 0, VK_WHOLE_SIZE, id.index);
+        if (std::holds_alternative<AutoAllocInfo>(buffer_slot.info.allocate_info))
+        {
+            vmaDestroyBuffer(this->vma_allocator, buffer_slot.vk_buffer, buffer_slot.vma_allocation);
+        }
+        else
+        {
+            vkDestroyBuffer(this->vk_device, buffer_slot.vk_buffer, {});
+        }
         buffer_slot = {};
         gpu_shader_resource_table.buffer_slots.return_slot(id);
     }
@@ -1565,11 +1886,18 @@ namespace daxa
     void ImplDevice::cleanup_image(ImageId id)
     {
         ImplImageSlot & image_slot = gpu_shader_resource_table.image_slots.dereference_id(id);
-        write_descriptor_set_image(this->vk_device, this->gpu_shader_resource_table.vk_descriptor_set, VK_NULL_HANDLE, image_slot.info.usage, id.index);
+        write_descriptor_set_image(this->vk_device, this->gpu_shader_resource_table.vk_descriptor_set, this->vk_null_image_view, image_slot.info.usage, id.index);
         vkDestroyImageView(vk_device, image_slot.view_slot.vk_image_view, nullptr);
-        if (image_slot.swapchain_image_index == NOT_OWNED_BY_SWAPCHAIN && image_slot.vma_allocation != nullptr)
+        if (image_slot.swapchain_image_index == NOT_OWNED_BY_SWAPCHAIN)
         {
-            vmaDestroyImage(this->vma_allocator, image_slot.vk_image, image_slot.vma_allocation);
+            if (std::holds_alternative<AutoAllocInfo>(image_slot.info.allocate_info))
+            {
+                vmaDestroyImage(this->vma_allocator, image_slot.vk_image, image_slot.vma_allocation);
+            }
+            else
+            {
+                vkDestroyImage(this->vk_device, image_slot.vk_image, {});
+            }
         }
         image_slot = {};
         gpu_shader_resource_table.image_slots.return_slot(id);
@@ -1579,7 +1907,7 @@ namespace daxa
     {
         DAXA_DBG_ASSERT_TRUE_M(gpu_shader_resource_table.image_slots.dereference_id(id).vk_image == VK_NULL_HANDLE, "can not destroy default image view of image");
         ImplImageViewSlot & image_slot = gpu_shader_resource_table.image_slots.dereference_id(id).view_slot;
-        write_descriptor_set_image(this->vk_device, this->gpu_shader_resource_table.vk_descriptor_set, VK_NULL_HANDLE, slot(image_slot.info.image).info.usage, id.index);
+        write_descriptor_set_image(this->vk_device, this->gpu_shader_resource_table.vk_descriptor_set, this->vk_null_image_view, ImageUsageFlagBits::SHADER_READ_WRITE | ImageUsageFlagBits::SHADER_READ_ONLY, id.index);
         vkDestroyImageView(vk_device, image_slot.vk_image_view, nullptr);
         image_slot = {};
         gpu_shader_resource_table.image_slots.return_slot(id);
@@ -1613,8 +1941,11 @@ namespace daxa
         vmaUnmapMemory(this->vma_allocator, this->buffer_device_address_buffer_allocation);
         vmaDestroyBuffer(this->vma_allocator, this->buffer_device_address_buffer, this->buffer_device_address_buffer_allocation);
         this->gpu_shader_resource_table.cleanup(this->vk_device);
+        vmaDestroyImage(this->vma_allocator, this->vk_null_image, this->vk_null_image_vma_allocation);
+        vmaDestroyBuffer(this->vma_allocator, this->vk_null_buffer, this->vk_null_buffer_vma_allocation);
         vmaDestroyAllocator(this->vma_allocator);
         vkDestroySampler(vk_device, this->vk_null_sampler, nullptr);
+        vkDestroyImageView(this->vk_device, this->vk_null_image_view, nullptr);
         vkDestroySemaphore(this->vk_device, this->vk_main_queue_gpu_timeline_semaphore, nullptr);
         vkDestroyDevice(this->vk_device, nullptr);
     }

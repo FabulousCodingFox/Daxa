@@ -97,6 +97,16 @@ static constexpr TBuiltInResource DAXA_DEFAULT_BUILTIN_RESOURCE = {
     .maxTaskWorkGroupSizeY_NV = 1,
     .maxTaskWorkGroupSizeZ_NV = 1,
     .maxMeshViewCountNV = 4,
+    // TODO: Verify these values are reasonable:
+    .maxMeshOutputVerticesEXT = 512,
+    .maxMeshOutputPrimitivesEXT = 512,
+    .maxMeshWorkGroupSizeX_EXT = 512,
+    .maxMeshWorkGroupSizeY_EXT = 512,
+    .maxMeshWorkGroupSizeZ_EXT = 512,
+    .maxTaskWorkGroupSizeX_EXT = 512,
+    .maxTaskWorkGroupSizeY_EXT = 512,
+    .maxTaskWorkGroupSizeZ_EXT = 512,
+    .maxMeshViewCountEXT = 2,
     .maxDualSourceDrawBuffersEXT = {},
     .limits{
         .nonInductiveForLoops = true,
@@ -409,11 +419,14 @@ namespace daxa
         impl.add_virtual_include_file(virtual_info);
     }
 
-    auto PipelineManager::reload_all() -> Result<bool>
+    auto PipelineManager::reload_all() -> std::optional<Result<void>>
     {
         auto & impl = *reinterpret_cast<ImplPipelineManager *>(this->object);
         return impl.reload_all();
     }
+
+    static std::mutex glslang_init_mtx;
+    static i32 pipeline_manager_count = 0;
 
     ImplPipelineManager::ImplPipelineManager(PipelineManagerInfo && a_info)
         : info{std::move(a_info)}
@@ -426,7 +439,7 @@ namespace daxa
         }
         if (!this->info.shader_compile_options.language.has_value())
         {
-            this->info.shader_compile_options.language = std::optional<ShaderLanguage>{ShaderLanguage::HLSL};
+            this->info.shader_compile_options.language = std::optional<ShaderLanguage>{ShaderLanguage::GLSL};
         }
         if (!this->info.shader_compile_options.enable_debug_info.has_value())
         {
@@ -435,15 +448,20 @@ namespace daxa
 
 #if DAXA_BUILT_WITH_UTILS_PIPELINE_MANAGER_GLSLANG
         {
-            glslang::InitializeProcess();
+            auto lock = std::lock_guard{glslang_init_mtx};
+            if (pipeline_manager_count == 0)
+            {
+                glslang::InitializeProcess();
+            }
+            ++pipeline_manager_count;
         }
 #endif
 
 #if DAXA_BUILT_WITH_UTILS_PIPELINE_MANAGER_DXC
         {
-            [[maybe_unused]] HRESULT dxc_utils_result = DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&this->dxc_backend.dxc_utils));
+            [[maybe_unused]] HRESULT const dxc_utils_result = DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&this->dxc_backend.dxc_utils));
             DAXA_DBG_ASSERT_TRUE_M(SUCCEEDED(dxc_utils_result), "Failed to create DXC utils");
-            [[maybe_unused]] HRESULT dxc_compiler_result = DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&this->dxc_backend.dxc_compiler));
+            [[maybe_unused]] HRESULT const dxc_compiler_result = DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&this->dxc_backend.dxc_compiler));
             DAXA_DBG_ASSERT_TRUE_M(SUCCEEDED(dxc_compiler_result), "Failed to create DXC compiler");
 
             this->dxc_backend.dxc_includer = std::make_shared<DxcCustomIncluder>();
@@ -457,7 +475,12 @@ namespace daxa
     {
 #if DAXA_BUILT_WITH_UTILS_PIPELINE_MANAGER_GLSLANG
         {
-            glslang::FinalizeProcess();
+            auto lock = std::lock_guard{glslang_init_mtx};
+            --pipeline_manager_count;
+            if (pipeline_manager_count == 0)
+            {
+                glslang::FinalizeProcess();
+            }
         }
 #endif
     }
@@ -481,18 +504,18 @@ namespace daxa
             .observed_hotload_files = {},
         };
         this->current_observed_hotload_files = &pipe_result.observed_hotload_files;
-        auto spirv_result = get_spirv(pipe_result.info.shader_info, pipe_result.info.debug_name, ShaderStage::COMP);
+        auto spirv_result = get_spirv(pipe_result.info.shader_info, pipe_result.info.name, ShaderStage::COMP);
         if (spirv_result.is_err())
         {
             return Result<ComputePipelineState>(spirv_result.message());
         }
         (*pipe_result.pipeline_ptr) = this->info.device.create_compute_pipeline({
             .shader_info = {
-                .binary = std::move(spirv_result.value()),
+                .byte_code = spirv_result.value(),
                 .entry_point = a_info.shader_info.compile_options.entry_point,
             },
             .push_constant_size = modified_info.push_constant_size,
-            .debug_name = modified_info.debug_name,
+            .name = modified_info.name,
         });
         return Result<ComputePipelineState>(std::move(pipe_result));
     }
@@ -501,7 +524,18 @@ namespace daxa
     {
         auto modified_info = a_info;
         modified_info.vertex_shader_info.compile_options.inherit(this->info.shader_compile_options);
-        modified_info.fragment_shader_info.compile_options.inherit(this->info.shader_compile_options);
+        if (modified_info.fragment_shader_info.has_value())
+        {
+            modified_info.fragment_shader_info.value().compile_options.inherit(this->info.shader_compile_options);
+        }
+        if (modified_info.tesselation_control_shader_info.has_value())
+        {
+            modified_info.tesselation_control_shader_info.value().compile_options.inherit(this->info.shader_compile_options);
+        }
+        if (modified_info.tesselation_evaluation_shader_info.has_value())
+        {
+            modified_info.tesselation_evaluation_shader_info.value().compile_options.inherit(this->info.shader_compile_options);
+        }
         if (modified_info.push_constant_size > MAX_PUSH_CONSTANT_BYTE_SIZE)
         {
             return Result<RasterPipelineState>(std::string("push constant size of ") + std::to_string(modified_info.push_constant_size) + std::string(" exceeds the maximum size of ") + std::to_string(MAX_PUSH_CONSTANT_BYTE_SIZE));
@@ -517,36 +551,69 @@ namespace daxa
             .observed_hotload_files = {},
         };
         this->current_observed_hotload_files = &pipe_result.observed_hotload_files;
-        auto vert_spirv_result = get_spirv(pipe_result.info.vertex_shader_info, pipe_result.info.debug_name, ShaderStage::VERT);
+        auto vert_spirv_result = get_spirv(pipe_result.info.vertex_shader_info, pipe_result.info.name, ShaderStage::VERT);
         if (vert_spirv_result.is_err())
         {
             return Result<RasterPipelineState>(vert_spirv_result.message());
         }
-        auto frag_spirv_result = get_spirv(pipe_result.info.fragment_shader_info, pipe_result.info.debug_name, ShaderStage::FRAG);
-        if (frag_spirv_result.is_err())
-        {
-            return Result<RasterPipelineState>(frag_spirv_result.message());
-        }
-        (*pipe_result.pipeline_ptr) = this->info.device.create_raster_pipeline({
-            .vertex_shader_info = {
-                .binary = std::move(vert_spirv_result.value()),
+        auto raster_pipeline_info = RasterPipelineInfo{
+            .vertex_shader_info = daxa::ShaderInfo{
+                .byte_code = vert_spirv_result.value(),
                 .entry_point = a_info.vertex_shader_info.compile_options.entry_point,
             },
-            .fragment_shader_info = {
-                .binary = std::move(frag_spirv_result.value()),
-                .entry_point = a_info.fragment_shader_info.compile_options.entry_point,
-            },
+            .fragment_shader_info = {},
             .color_attachments = modified_info.color_attachments,
             .depth_test = modified_info.depth_test,
             .raster = modified_info.raster,
             .push_constant_size = modified_info.push_constant_size,
-            .debug_name = modified_info.debug_name,
-        });
+            .name = modified_info.name,
+        };
+        auto frag_spirv_result = daxa::Result<std::vector<unsigned int>>("useless string");
+        if (pipe_result.info.fragment_shader_info.has_value())
+        {
+            frag_spirv_result = get_spirv(pipe_result.info.fragment_shader_info.value(), pipe_result.info.name, ShaderStage::FRAG);
+            if (frag_spirv_result.is_err())
+            {
+                return Result<RasterPipelineState>(frag_spirv_result.message());
+            }
+            raster_pipeline_info.fragment_shader_info = daxa::ShaderInfo{
+                .byte_code = frag_spirv_result.value(),
+                .entry_point = a_info.fragment_shader_info.value().compile_options.entry_point,
+            };
+        }
+        auto tess_control_spirv_result = daxa::Result<std::vector<unsigned int>>("useless string");
+        if (pipe_result.info.tesselation_control_shader_info.has_value())
+        {
+            tess_control_spirv_result = get_spirv(pipe_result.info.tesselation_control_shader_info.value(), pipe_result.info.name, ShaderStage::TESS_CONTROL);
+            if (tess_control_spirv_result.is_err())
+            {
+                return Result<RasterPipelineState>(tess_control_spirv_result.message());
+            }
+            raster_pipeline_info.tesselation_control_shader_info = daxa::ShaderInfo{
+                .byte_code = tess_control_spirv_result.value(),
+                .entry_point = a_info.tesselation_control_shader_info.value().compile_options.entry_point,
+            };
+        }
+        auto tess_eval_spirv_result = daxa::Result<std::vector<unsigned int>>("useless string");
+        if (pipe_result.info.tesselation_evaluation_shader_info.has_value())
+        {
+            tess_eval_spirv_result = get_spirv(pipe_result.info.tesselation_evaluation_shader_info.value(), pipe_result.info.name, ShaderStage::TESS_EVAL);
+            if (tess_eval_spirv_result.is_err())
+            {
+                return Result<RasterPipelineState>(tess_eval_spirv_result.message());
+            }
+            raster_pipeline_info.tesselation_evaluation_shader_info = daxa::ShaderInfo{
+                .byte_code = tess_eval_spirv_result.value(),
+                .entry_point = a_info.tesselation_evaluation_shader_info.value().compile_options.entry_point,
+            };
+        }
+        (*pipe_result.pipeline_ptr) = this->info.device.create_raster_pipeline(raster_pipeline_info);
         return Result<RasterPipelineState>(std::move(pipe_result));
     }
 
     auto ImplPipelineManager::add_compute_pipeline(ComputePipelineCompileInfo const & a_info) -> Result<std::shared_ptr<ComputePipeline>>
     {
+        DAXA_DBG_ASSERT_TRUE_M(!std::holds_alternative<std::monostate>(a_info.shader_info.source), "must provide shader source");
         auto pipe_result = create_compute_pipeline(a_info);
         if (pipe_result.is_err())
         {
@@ -660,7 +727,7 @@ namespace daxa
         shader_preprocess(virtual_file.contents, virtual_info.name);
     }
 
-    auto ImplPipelineManager::reload_all() -> Result<bool>
+    auto ImplPipelineManager::reload_all() -> std::optional<Result<void>>
     {
         bool reloaded = false;
 
@@ -668,15 +735,15 @@ namespace daxa
         {
             if (check_if_sources_changed(last_hotload_time, observed_hotload_files, virtual_files))
             {
+                reloaded = true;
                 auto new_pipeline = create_compute_pipeline(compile_info);
                 if (new_pipeline.is_ok())
                 {
                     *pipeline = std::move(*new_pipeline.value().pipeline_ptr);
-                    reloaded = true;
                 }
                 else
                 {
-                    return Result<bool>(new_pipeline.m);
+                    return {Result<void>(new_pipeline.m)};
                 }
             }
         }
@@ -685,29 +752,37 @@ namespace daxa
         {
             if (check_if_sources_changed(last_hotload_time, observed_hotload_files, virtual_files))
             {
+                reloaded = true;
                 auto new_pipeline = create_raster_pipeline(compile_info);
                 if (new_pipeline.is_ok())
                 {
                     *pipeline = std::move(*new_pipeline.value().pipeline_ptr);
-                    reloaded = true;
                 }
                 else
                 {
-                    return Result<bool>(new_pipeline.m);
+                    return {Result<void>(new_pipeline.m)};
                 }
             }
         }
 
-        return Result<bool>(reloaded);
+        if (reloaded)
+        {
+            return {Result<void>{true}};
+        }
+        else
+        {
+            return std::nullopt;
+        }
     }
 
     auto ImplPipelineManager::get_spirv(ShaderCompileInfo const & shader_info, std::string const & debug_name_opt, ShaderStage shader_stage) -> Result<std::vector<u32>>
     {
         current_shader_info = &shader_info;
         std::vector<u32> spirv = {};
-        if (std::holds_alternative<ShaderBinary>(shader_info.source))
+        if (std::holds_alternative<ShaderByteCode>(shader_info.source))
         {
-            spirv = std::get<ShaderBinary>(shader_info.source);
+            auto byte_code = std::get<ShaderByteCode>(shader_info.source);
+            spirv.assign(byte_code.begin(), byte_code.end());
         }
         else
         {
@@ -762,26 +837,36 @@ namespace daxa
         }
         current_shader_info = nullptr;
 
-        std::string debug_name = "unnamed-shader";
+        std::string name = "unnamed-shader";
         if (ShaderFile const * shader_file = std::get_if<ShaderFile>(&shader_info.source))
         {
-            debug_name = shader_file->path.string();
+            name = shader_file->path.string();
         }
         else if (!debug_name_opt.empty())
         {
-            debug_name = debug_name_opt;
+            name = debug_name_opt;
         }
 
         if (shader_info.compile_options.write_out_shader_binary.has_value())
         {
-            std::replace(debug_name.begin(), debug_name.end(), '/', '_');
-            std::replace(debug_name.begin(), debug_name.end(), '\\', '_');
-            std::replace(debug_name.begin(), debug_name.end(), ':', '_');
-            debug_name = debug_name + ".spv";
-            std::ofstream ofs(shader_info.compile_options.write_out_shader_binary.value() / debug_name, std::ios_base::trunc | std::ios_base::binary);
+            std::replace(name.begin(), name.end(), '/', '_');
+            std::replace(name.begin(), name.end(), '\\', '_');
+            std::replace(name.begin(), name.end(), ':', '_');
+            name = name + ".spv";
+            std::ofstream ofs(shader_info.compile_options.write_out_shader_binary.value() / name, std::ios_base::trunc | std::ios_base::binary);
             ofs.write(reinterpret_cast<char const *>(spirv.data()), static_cast<std::streamsize>(spirv.size() * 4));
             ofs.close();
         }
+
+#if DAXA_BUILT_WITH_UTILS_PIPELINE_MANAGER_SPIRV_VALIDATION
+        spirv_tools.SetMessageConsumer(
+            [&](spv_message_level_t level, [[maybe_unused]] char const * source, [[maybe_unused]] spv_position_t const & position, char const * message)
+            { DAXA_DBG_ASSERT_TRUE_M(level > SPV_MSG_WARNING, std::format("SPIR-V Validation error after compiling {}:\n - {}", debug_name_opt, message)); });
+        spvtools::ValidatorOptions options{};
+        options.SetScalarBlockLayout(true);
+        // spirv_tools.Validate(spirv.data(), spirv.size(), options);
+#endif
+
         return Result<std::vector<u32>>(spirv);
     }
 
@@ -868,6 +953,8 @@ namespace daxa
             case ShaderStage::COMP: return EShLanguage::EShLangCompute;
             case ShaderStage::VERT: return EShLanguage::EShLangVertex;
             case ShaderStage::FRAG: return EShLanguage::EShLangFragment;
+            case ShaderStage::TESS_CONTROL: return EShLanguage::EShLangTessControl;
+            case ShaderStage::TESS_EVAL: return EShLanguage::EShLangTessEvaluation;
             default:
                 DAXA_DBG_ASSERT_TRUE_M(false, "Tried creating shader with unknown shader stage");
                 return EShLanguage::EShLangCount;
@@ -883,6 +970,22 @@ namespace daxa
         // is unnecessary, though, since it appears to default to
         // the latest version.
         // preamble += "#version 450\n";
+
+        preamble += "#define DAXA_SHADER_STAGE_COMPUTE 0\n";
+        preamble += "#define DAXA_SHADER_STAGE_VERTEX 1\n";
+        preamble += "#define DAXA_SHADER_STAGE_TESSELATION_CONTROL 2\n";
+        preamble += "#define DAXA_SHADER_STAGE_TESSELATION_EVALUATION 3\n";
+        preamble += "#define DAXA_SHADER_STAGE_FRAGMENT 4\n";
+
+        switch (shader_stage)
+        {
+        case ShaderStage::COMP: preamble += "#define DAXA_SHADER_STAGE 0\n"; break;
+        case ShaderStage::VERT: preamble += "#define DAXA_SHADER_STAGE 1\n"; break;
+        case ShaderStage::TESS_CONTROL: preamble += "#define DAXA_SHADER_STAGE 2\n"; break;
+        case ShaderStage::TESS_EVAL: preamble += "#define DAXA_SHADER_STAGE 3\n"; break;
+        case ShaderStage::FRAG: preamble += "#define DAXA_SHADER_STAGE 4\n"; break;
+        }
+
         preamble += "#define DAXA_SHADER 1\n";
         preamble += "#define DAXA_SHADERLANG 1\n";
         preamble += "#extension GL_GOOGLE_include_directive : enable\n";
@@ -916,14 +1019,14 @@ namespace daxa
                 preamble += std::string("#define ") + shader_define.name + "\n";
             }
         }
-        std::string debug_name = "unnamed-shader";
+        std::string name = "unnamed-shader";
         if (ShaderFile const * shader_file = std::get_if<ShaderFile>(&shader_info.source))
         {
-            debug_name = shader_file->path.string();
+            name = shader_file->path.string();
         }
         else if (!debug_name_opt.empty())
         {
-            debug_name = debug_name_opt;
+            name = debug_name_opt;
         }
 
         glslang::TShader shader{spirv_stage};
@@ -932,7 +1035,7 @@ namespace daxa
 
         auto const & source_str = code.string;
         auto const * source_cstr = source_str.c_str();
-        auto const * name_cstr = debug_name.c_str();
+        auto const * name_cstr = name.c_str();
 
         bool const use_debug_info = shader_info.compile_options.enable_debug_info.value_or(false);
 
@@ -974,7 +1077,6 @@ namespace daxa
         glslang::SpvOptions spv_options{};
         spv_options.generateDebugInfo = use_debug_info;
 
-        // NOTE: For some reason, this also causes a crash in GLSLANG
         // spv_options.emitNonSemanticShaderDebugInfo = use_debug_info;
 
         spv_options.stripDebugInfo = !use_debug_info;
@@ -983,11 +1085,11 @@ namespace daxa
 
         if (shader_info.compile_options.write_out_preprocessed_code.has_value())
         {
-            std::replace(debug_name.begin(), debug_name.end(), '/', '_');
-            std::replace(debug_name.begin(), debug_name.end(), '\\', '_');
-            std::replace(debug_name.begin(), debug_name.end(), ':', '_');
-            std::string const name = std::string("preprocessed_") + debug_name + ".glsl";
-            auto filepath = shader_info.compile_options.write_out_preprocessed_code.value() / name;
+            std::replace(name.begin(), name.end(), '/', '_');
+            std::replace(name.begin(), name.end(), '\\', '_');
+            std::replace(name.begin(), name.end(), ':', '_');
+            std::string const file_name = std::string("preprocessed_") + name + ".glsl";
+            auto filepath = shader_info.compile_options.write_out_preprocessed_code.value() / file_name;
             std::string preprocessed_result = {};
             shader.preprocess(&DAXA_DEFAULT_BUILTIN_RESOURCE, SHADER_VERSION, EProfile::ENoProfile, false, false, messages, &preprocessed_result, includer);
             auto ofs = std::ofstream{filepath, std::ios_base::trunc};
@@ -1034,6 +1136,21 @@ namespace daxa
         args.push_back(L"-DDAXA_SHADER");
         args.push_back(L"-DDAXA_SHADERLANG=2");
 
+        args.push_back(L"-DDAXA_SHADER_STAGE_COMPUTE=0");
+        args.push_back(L"-DDAXA_SHADER_STAGE_VERTEX=1");
+        args.push_back(L"-DDAXA_SHADER_STAGE_TESS_CONTROL=2");
+        args.push_back(L"-DDAXA_SHADER_STAGE_TESS_EVAL=3");
+        args.push_back(L"-DDAXA_SHADER_STAGE_FRAGMENT=4");
+
+        switch (shader_stage)
+        {
+        case ShaderStage::COMP: args.push_back(L"-DDAXA_SHADER_STAGE=0"); break;
+        case ShaderStage::VERT: args.push_back(L"-DDAXA_SHADER_STAGE=1"); break;
+        case ShaderStage::TESS_CONTROL: args.push_back(L"-DDAXA_SHADER_STAGE=2"); break;
+        case ShaderStage::TESS_EVAL: args.push_back(L"-DDAXA_SHADER_STAGE=3"); break;
+        case ShaderStage::FRAG: args.push_back(L"-DDAXA_SHADER_STAGE=4"); break;
+        }
+
         for (auto const & root : shader_info.compile_options.root_paths)
         {
             args.push_back(L"-I");
@@ -1067,6 +1184,8 @@ namespace daxa
         {
         case ShaderStage::COMP: profile[0] = L'c'; break;
         case ShaderStage::VERT: profile[0] = L'v'; break;
+        case ShaderStage::TESS_CONTROL: profile[0] = L'h'; break;
+        case ShaderStage::TESS_EVAL: profile[0] = L'd'; break;
         case ShaderStage::FRAG: profile[0] = L'p'; break;
         default: break;
         }

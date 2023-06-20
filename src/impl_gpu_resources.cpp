@@ -12,24 +12,29 @@ namespace daxa
         return ImageViewId{{.index = index, .version = version}};
     }
 
-    auto to_string(ImageId image_id) -> std::string
+    auto to_string(GPUResourceId const & id) -> std::string
     {
-        std::string ret = {};
-        ret += " index: " + std::to_string(image_id.index);
-        ret += " version: " + std::to_string(image_id.version);
-        return ret;
+        return std::format("index: {}, version: {}", static_cast<u32>(id.index), static_cast<u32>(id.version));
     }
 
-    auto to_string(types::BufferId buffer_id) -> std::string
+    auto to_string(ImageViewType const & type) -> std::string_view
     {
-        std::string ret = {};
-        ret += " index: " + std::to_string(buffer_id.index);
-        ret += " version: " + std::to_string(buffer_id.version);
-        return ret;
+        switch(type)
+        {
+        case ImageViewType::REGULAR_1D: return "REGULAR_1D";
+        case ImageViewType::REGULAR_2D: return "REGULAR_2D";
+        case ImageViewType::REGULAR_3D: return "REGULAR_3D";
+        case ImageViewType::CUBE: return "CUBE";
+        case ImageViewType::REGULAR_1D_ARRAY: return "REGULAR_1D_ARRAY";
+        case ImageViewType::REGULAR_2D_ARRAY: return "REGULAR_2D_ARRAY";
+        case ImageViewType::CUBE_ARRAY: return "CUBE_ARRAY";
+        default: return "NONE";
+        }
     }
 
     void GPUShaderResourceTable::initialize(usize max_buffers, usize max_images, usize max_samplers, usize max_acceleration_structures,
-                                            VkDevice device, VkBuffer device_address_buffer)
+                                            VkDevice device, VkBuffer device_address_buffer,
+                                            PFN_vkSetDebugUtilsObjectNameEXT vkSetDebugUtilsObjectNameEXT)
     {
         buffer_slots.max_resources = max_buffers;
         image_slots.max_resources = max_images;
@@ -172,17 +177,82 @@ namespace daxa
 
         vkAllocateDescriptorSets(device, &vk_descriptor_set_allocate_info, &this->vk_descriptor_set);
 
+        // Constant buffer set:
+
+        std::array<VkDescriptorSetLayoutBinding, CONSTANT_BUFFER_BINDING_COUNT> constant_buffer_layout_bindings = {};
+        for (u32 binding = 0; binding < CONSTANT_BUFFER_BINDING_COUNT; ++binding)
+        {
+            constant_buffer_layout_bindings[binding] = VkDescriptorSetLayoutBinding
+            {
+                .binding = binding,
+                .descriptorType = VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                .descriptorCount = 1,
+                .stageFlags = VkShaderStageFlagBits::VK_SHADER_STAGE_ALL,
+                .pImmutableSamplers = {},
+            };
+        }
+
+        std::array<VkDescriptorBindingFlags, CONSTANT_BUFFER_BINDING_COUNT> const constant_buffer_set_binding_flags = {
+            VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT,
+            VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT,
+            VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT,
+            VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT,
+            VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT,
+            VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT,
+            VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT,
+            VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT,
+        };
+
+        VkDescriptorSetLayoutBindingFlagsCreateInfo constant_buffer_set_binding_flags_info{
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
+            .pNext = nullptr,
+            .bindingCount = static_cast<u32>(constant_buffer_set_binding_flags.size()),
+            .pBindingFlags = constant_buffer_set_binding_flags.data(),
+        };
+
+        VkDescriptorSetLayoutCreateInfo constant_buffer_bindings_set_layout_create_info
+        {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+            .pNext = &constant_buffer_set_binding_flags_info,
+            .flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR,
+            .bindingCount = CONSTANT_BUFFER_BINDING_COUNT,
+            .pBindings = constant_buffer_layout_bindings.data(),
+        };
+
+        vkCreateDescriptorSetLayout(device, &constant_buffer_bindings_set_layout_create_info, nullptr, &this->constant_buffer_binding_set_layout);
+
+        auto constant_buffer_set_layout_name = std::string("constant buffer descriptor set");
+        VkDebugUtilsObjectNameInfoEXT constant_buffer_set_layout_name_info{
+            .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
+            .pNext = nullptr,
+            .objectType = VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT,
+            .objectHandle = reinterpret_cast<uint64_t>(constant_buffer_binding_set_layout),
+            .pObjectName = constant_buffer_set_layout_name.c_str(),
+        };
+        vkSetDebugUtilsObjectNameEXT(device, &constant_buffer_set_layout_name_info);
+
+        std::array<VkDescriptorSetLayout, 2> vk_descriptor_set_layouts = { this->vk_descriptor_set_layout, this->constant_buffer_binding_set_layout };
         VkPipelineLayoutCreateInfo vk_pipeline_create_info{
             .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
             .pNext = nullptr,
             .flags = {},
-            .setLayoutCount = 1,
-            .pSetLayouts = &this->vk_descriptor_set_layout,
+            .setLayoutCount = static_cast<u32>(vk_descriptor_set_layouts.size()),
+            .pSetLayouts = vk_descriptor_set_layouts.data(),
             .pushConstantRangeCount = 0,
             .pPushConstantRanges = nullptr,
         };
 
         vkCreatePipelineLayout(device, &vk_pipeline_create_info, nullptr, pipeline_layouts.data());
+
+        auto pipeline_layout_name = std::string("push constant size 0 bytes");
+        VkDebugUtilsObjectNameInfoEXT pipeline_layout_name_info{
+            .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
+            .pNext = nullptr,
+            .objectType = VK_OBJECT_TYPE_PIPELINE_LAYOUT,
+            .objectHandle = reinterpret_cast<uint64_t>(pipeline_layouts.at(0)),
+            .pObjectName = pipeline_layout_name.c_str(),
+        };
+        vkSetDebugUtilsObjectNameEXT(device, &pipeline_layout_name_info);
 
         for (usize i = 1; i < PIPELINE_LAYOUT_COUNT; ++i)
         {
@@ -194,6 +264,11 @@ namespace daxa
             vk_pipeline_create_info.pushConstantRangeCount = 1;
             vk_pipeline_create_info.pPushConstantRanges = &vk_push_constant_range;
             vkCreatePipelineLayout(device, &vk_pipeline_create_info, nullptr, &pipeline_layouts.at(i));
+
+            pipeline_layout_name_info.objectHandle = reinterpret_cast<uint64_t>(pipeline_layouts.at(i));
+            pipeline_layout_name = std::string("push constant size ") + std::to_string(i * 4) + std::string(" bytes");
+            pipeline_layout_name_info.pObjectName = pipeline_layout_name.c_str();
+            vkSetDebugUtilsObjectNameEXT(device, &pipeline_layout_name_info);
         }
 
         VkDescriptorBufferInfo const write_buffer{
@@ -222,7 +297,7 @@ namespace daxa
     {
         [[maybe_unused]] auto print_remaining = [&](std::string prefix, auto & pages)
         {
-            std::string ret{prefix + "\nThis can happen due to not waiting for the gpu to finish executing, as daxa deferres destruction. List of survivors:\n"};
+            std::string ret{prefix + "\nthis can happen due to not waiting for the gpu to finish executing, as daxa defers destruction. List of survivors:\n"};
             for (auto & page : pages)
             {
                 if (page)
@@ -244,7 +319,7 @@ namespace daxa
                         }
                         if (!handle_invalid)
                         {
-                            ret += std::string("debug name: \"") + std::string(slot.first.info.debug_name) + '\"';
+                            ret += std::string("debug name: \"") + std::string(slot.first.info.name) + '\"';
                             if (slot.first.zombie)
                             {
                                 ret += " (destroy was already called)";
@@ -256,14 +331,15 @@ namespace daxa
             }
             return ret;
         };
-        DAXA_DBG_ASSERT_TRUE_M(buffer_slots.free_index_stack.size() == buffer_slots.next_index, print_remaining("Not all buffers have been destroyed before destroying the device.", buffer_slots.pages));
-        DAXA_DBG_ASSERT_TRUE_M(image_slots.free_index_stack.size() == image_slots.next_index, print_remaining("Not all images have been destroyed before destroying the device.", image_slots.pages));
-        DAXA_DBG_ASSERT_TRUE_M(sampler_slots.free_index_stack.size() == sampler_slots.next_index, print_remaining("Not all samplers have been destroyed before destroying the device.", sampler_slots.pages));
+        DAXA_DBG_ASSERT_TRUE_M(buffer_slots.free_index_stack.size() == buffer_slots.next_index, print_remaining("detected leaked buffers; not all buffers have been destroyed before destroying the device;", buffer_slots.pages));
+        DAXA_DBG_ASSERT_TRUE_M(image_slots.free_index_stack.size() == image_slots.next_index, print_remaining("detected leaked images; not all images have been destroyed before destroying the device;", image_slots.pages));
+        DAXA_DBG_ASSERT_TRUE_M(sampler_slots.free_index_stack.size() == sampler_slots.next_index, print_remaining("detected leaked samplers; not all samplers have been destroyed before destroying the device;", sampler_slots.pages));
         for (usize i = 0; i < PIPELINE_LAYOUT_COUNT; ++i)
         {
             vkDestroyPipelineLayout(device, pipeline_layouts.at(i), nullptr);
         }
         vkDestroyDescriptorSetLayout(device, this->vk_descriptor_set_layout, nullptr);
+        vkDestroyDescriptorSetLayout(device, this->constant_buffer_binding_set_layout, nullptr);
         vkResetDescriptorPool(device, this->vk_descriptor_pool, {});
         vkDestroyDescriptorPool(device, this->vk_descriptor_pool, nullptr);
     }

@@ -1,14 +1,29 @@
 #pragma once
 
 #include <daxa/core.hpp>
-#include <bit>
+#include <daxa/memory_block.hpp>
 
 namespace daxa
 {
+
+    enum struct ImageViewType
+    {
+        REGULAR_1D = 0,
+        REGULAR_2D = 1,
+        REGULAR_3D = 2,
+        CUBE = 3,
+        REGULAR_1D_ARRAY = 4,
+        REGULAR_2D_ARRAY = 5,
+        CUBE_ARRAY = 6,
+        MAX_ENUM = 0x7fffffff,
+    };
+
+    auto to_string(ImageViewType const & type) -> std::string_view;
+
     struct GPUResourceId
     {
-        u32 index : 24;
-        u32 version : 8;
+        u32 index : 24 = {};
+        u32 version : 8 = {};
 
         auto is_empty() const -> bool;
 
@@ -34,6 +49,12 @@ namespace daxa
         {
         };
 
+        template<ImageViewType VIEW_TYPE>
+        struct TypedImageViewId : public ImageViewId
+        {
+            static constexpr inline auto view_type() -> ImageViewType { return VIEW_TYPE; }
+        };
+
         struct ImageId : public GPUResourceId
         {
             auto default_view() const -> ImageViewId;
@@ -48,15 +69,13 @@ namespace daxa
         };
     } // namespace types
 
-    auto to_string(types::ImageId image_id) -> std::string;
-
-    auto to_string(types::BufferId buffer_id) -> std::string;
+    auto to_string(GPUResourceId const & id) -> std::string;
 
     struct BufferInfo
     {
-        MemoryFlags memory_flags = {};
         u32 size = {};
-        std::string debug_name = {};
+        AllocateInfo allocate_info = {};
+        std::string name = {};
     };
 
     struct ImageInfo
@@ -69,8 +88,8 @@ namespace daxa
         u32 array_layer_count = 1;
         u32 sample_count = 1;
         ImageUsageFlags usage = {};
-        MemoryFlags memory_flags = {};
-        std::string debug_name = {};
+        AllocateInfo allocate_info = {};
+        std::string name = {};
     };
 
     struct ImageViewInfo
@@ -79,7 +98,7 @@ namespace daxa
         Format format = Format::R8G8B8A8_UNORM;
         ImageId image = {};
         ImageMipArraySlice slice = {};
-        std::string debug_name = {};
+        std::string name = {};
     };
 
     struct SamplerInfo
@@ -100,7 +119,7 @@ namespace daxa
         f32 max_lod = 1.0f;
         BorderColor border_color = BorderColor::FLOAT_TRANSPARENT_BLACK;
         bool enable_unnormalized_coordinates = false;
-        std::string debug_name = {};
+        std::string name = {};
     };
 
     struct AccelerationStructureInfo

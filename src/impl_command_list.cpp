@@ -12,12 +12,12 @@ namespace daxa
         return VkImageMemoryBarrier2{
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
             .pNext = nullptr,
-            .srcStageMask = image_barrier.awaited_pipeline_access.stages.data,
-            .srcAccessMask = image_barrier.awaited_pipeline_access.type.data,
-            .dstStageMask = image_barrier.waiting_pipeline_access.stages.data,
-            .dstAccessMask = image_barrier.waiting_pipeline_access.type.data,
-            .oldLayout = static_cast<VkImageLayout>(image_barrier.before_layout),
-            .newLayout = static_cast<VkImageLayout>(image_barrier.after_layout),
+            .srcStageMask = image_barrier.src_access.stages.data,
+            .srcAccessMask = image_barrier.src_access.type.data,
+            .dstStageMask = image_barrier.dst_access.stages.data,
+            .dstAccessMask = image_barrier.dst_access.type.data,
+            .oldLayout = static_cast<VkImageLayout>(image_barrier.src_layout),
+            .newLayout = static_cast<VkImageLayout>(image_barrier.dst_layout),
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .image = vk_image,
@@ -30,10 +30,10 @@ namespace daxa
         return VkMemoryBarrier2{
             .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
             .pNext = nullptr,
-            .srcStageMask = memory_barrier.awaited_pipeline_access.stages.data,
-            .srcAccessMask = memory_barrier.awaited_pipeline_access.type.data,
-            .dstStageMask = memory_barrier.waiting_pipeline_access.stages.data,
-            .dstAccessMask = memory_barrier.waiting_pipeline_access.type.data,
+            .srcStageMask = memory_barrier.src_access.stages.data,
+            .srcAccessMask = memory_barrier.src_access.type.data,
+            .dstStageMask = memory_barrier.dst_access.stages.data,
+            .dstAccessMask = memory_barrier.dst_access.type.data,
         };
     }
 
@@ -180,11 +180,30 @@ namespace daxa
 
         if ((info.dst_slice.image_aspect & ImageAspectFlagBits::COLOR) != ImageAspectFlagBits::NONE)
         {
-            // TODO: Also use the other 4 component values: i32 and u32!
-            auto const & clear_value = std::get<std::array<f32, 4>>(info.clear_value);
-            VkClearColorValue const color{
-                .float32 = {clear_value[0], clear_value[1], clear_value[2], clear_value[3]},
-            };
+            DAXA_DBG_ASSERT_TRUE_M(
+                !std::holds_alternative<DepthValue>(info.clear_value),
+                "Provided a depth clear value for an image with a color aspect!");
+
+            VkClearColorValue color;
+
+            std::visit(
+                [&color](auto && clear_value)
+                {
+                    using T = std::decay_t<decltype(clear_value)>;
+                    if constexpr (std::is_same_v<T, std::array<f32, 4>>)
+                    {
+                        color = {.float32 = {clear_value[0], clear_value[1], clear_value[2], clear_value[3]}};
+                    }
+                    else if constexpr (std::is_same_v<T, std::array<i32, 4>>)
+                    {
+                        color = {.int32 = {clear_value[0], clear_value[1], clear_value[2], clear_value[3]}};
+                    }
+                    else if constexpr (std::is_same_v<T, std::array<u32, 4>>)
+                    {
+                        color = {.uint32 = {clear_value[0], clear_value[1], clear_value[2], clear_value[3]}};
+                    }
+                },
+                info.clear_value);
 
             vkCmdClearColorImage(
                 impl.vk_cmd_buffer,
@@ -197,6 +216,10 @@ namespace daxa
 
         if ((info.dst_slice.image_aspect & (ImageAspectFlagBits::DEPTH | ImageAspectFlagBits::STENCIL)) != ImageAspectFlagBits::NONE)
         {
+            DAXA_DBG_ASSERT_TRUE_M(
+                std::holds_alternative<DepthValue>(info.clear_value),
+                "Provided a color clear value for an image with a depth / stencil aspect!");
+
             auto const & clear_value = std::get<DepthValue>(info.clear_value);
             VkClearDepthStencilValue const color{
                 .depth = clear_value.depth,
@@ -227,7 +250,7 @@ namespace daxa
             info.clear_value);
     }
 
-    void CommandList::push_constant(void const * data, u32 size, u32 offset)
+    void CommandList::push_constant_vptr(void const * data, u32 size, u32 offset)
     {
         auto & impl = *as<ImplCommandList>();
         DAXA_DBG_ASSERT_TRUE_M(impl.recording_complete == false, "can only complete uncompleted command list");
@@ -241,25 +264,43 @@ namespace daxa
     void CommandList::set_pipeline(ComputePipeline const & pipeline)
     {
         auto & impl = *as<ImplCommandList>();
-        DAXA_DBG_ASSERT_TRUE_M(pipeline.object != nullptr, "invalid pipline handle - valid handle must be retrieved from the pipeline compiler before use");
+        DAXA_DBG_ASSERT_TRUE_M(pipeline.object != nullptr, "invalid pipeline handle - valid handle must be retrieved from the pipeline compiler before use");
         auto const & pipeline_impl = *pipeline.as<ImplComputePipeline>();
         DAXA_DBG_ASSERT_TRUE_M(impl.recording_complete == false, "can only complete uncompleted command list");
         impl.flush_barriers();
+
+        impl.flush_constant_buffer_bindings(VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_impl.vk_pipeline_layout);
 
         vkCmdBindDescriptorSets(impl.vk_cmd_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_impl.vk_pipeline_layout, 0, 1, &impl.impl_device.as<ImplDevice>()->gpu_shader_resource_table.vk_descriptor_set, 0, nullptr);
 
         vkCmdBindPipeline(impl.vk_cmd_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_impl.vk_pipeline);
     }
 
+    void CommandList::set_uniform_buffer(SetConstantBufferInfo const & info)
+    {
+        auto & impl = *as<ImplCommandList>();
+        auto & impl_device = *impl.impl_device.as<ImplDevice>();
+        DAXA_DBG_ASSERT_TRUE_M(impl.recording_complete == false, "can only complete uncompleted command list");
+        DAXA_DBG_ASSERT_TRUE_M(info.size > 0, "the set constant buffer range must be greater then 0");
+        DAXA_DBG_ASSERT_TRUE_M(info.offset % impl_device.vk_info.limits.min_uniform_buffer_offset_alignment == 0, "must respect the alignment requirements of uniform buffer bindings for constant buffer offsets!");
+        const usize buffer_size = impl_device.slot(info.buffer).info.size;
+        [[maybe_unused]] const bool binding_in_range = info.size + info.offset <= buffer_size;
+        DAXA_DBG_ASSERT_TRUE_M(binding_in_range, "The given offset and size of the buffer binding is outside of the bounds of the given buffer");
+        DAXA_DBG_ASSERT_TRUE_M(info.slot < CONSTANT_BUFFER_BINDINGS_COUNT, "there are only 8 binding slots available for constant buffers");
+        impl.current_constant_buffer_bindings[info.slot] = info;
+    }
+
     void CommandList::set_pipeline(RasterPipeline const & pipeline)
     {
         auto & impl = *as<ImplCommandList>();
-        DAXA_DBG_ASSERT_TRUE_M(pipeline.object != nullptr, "invalid pipline handle - valid handle must be retrieved from the pipeline compiler before use");
+        DAXA_DBG_ASSERT_TRUE_M(pipeline.object != nullptr, "invalid pipeline handle - valid handle must be retrieved from the pipeline compiler before use");
         auto const & pipeline_impl = *pipeline.as<ImplRasterPipeline>();
         DAXA_DBG_ASSERT_TRUE_M(impl.recording_complete == false, "can only complete uncompleted command list");
         impl.flush_barriers();
 
         vkCmdBindDescriptorSets(impl.vk_cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_impl.vk_pipeline_layout, 0, 1, &impl.impl_device.as<ImplDevice>()->gpu_shader_resource_table.vk_descriptor_set, 0, nullptr);
+
+        impl.flush_constant_buffer_bindings(VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_impl.vk_pipeline_layout);
 
         vkCmdBindPipeline(impl.vk_cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_impl.vk_pipeline);
     }
@@ -352,10 +393,10 @@ namespace daxa
         impl.memory_barrier_batch.at(impl.memory_barrier_batch_count++) = {
             .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
             .pNext = nullptr,
-            .srcStageMask = info.awaited_pipeline_access.stages.data,
-            .srcAccessMask = info.awaited_pipeline_access.type.data,
-            .dstStageMask = info.waiting_pipeline_access.stages.data,
-            .dstAccessMask = info.waiting_pipeline_access.type.data,
+            .srcStageMask = info.src_access.stages.data,
+            .srcAccessMask = info.src_access.type.data,
+            .dstStageMask = info.dst_access.stages.data,
+            .dstAccessMask = info.dst_access.type.data,
         };
     }
 
@@ -460,12 +501,12 @@ namespace daxa
         impl.image_barrier_batch.at(impl.image_barrier_batch_count++) = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
             .pNext = nullptr,
-            .srcStageMask = info.awaited_pipeline_access.stages.data,
-            .srcAccessMask = info.awaited_pipeline_access.type.data,
-            .dstStageMask = info.waiting_pipeline_access.stages.data,
-            .dstAccessMask = info.waiting_pipeline_access.type.data,
-            .oldLayout = static_cast<VkImageLayout>(info.before_layout),
-            .newLayout = static_cast<VkImageLayout>(info.after_layout),
+            .srcStageMask = info.src_access.stages.data,
+            .srcAccessMask = info.src_access.type.data,
+            .dstStageMask = info.dst_access.stages.data,
+            .dstAccessMask = info.dst_access.type.data,
+            .oldLayout = static_cast<VkImageLayout>(info.src_layout),
+            .newLayout = static_cast<VkImageLayout>(info.dst_layout),
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .image = impl.impl_device.as<ImplDevice>()->slot(info.image_id).vk_image,
@@ -483,6 +524,30 @@ namespace daxa
         {
             DAXA_DBG_ASSERT_TRUE_M(!in.image_view.is_empty(), "must provide either image view to render attachment");
 
+            VkClearValue clear_value{};
+            std::visit(
+                [&clear_value](auto && daxa_clear_value)
+                {
+                    using T = std::decay_t<decltype(daxa_clear_value)>;
+                    if constexpr (std::is_same_v<T, std::array<f32, 4>>)
+                    {
+                        clear_value = {.color = {.float32 = {daxa_clear_value[0], daxa_clear_value[1], daxa_clear_value[2], daxa_clear_value[3]}}};
+                    }
+                    else if constexpr (std::is_same_v<T, std::array<i32, 4>>)
+                    {
+                        clear_value = {.color = {.int32 = {daxa_clear_value[0], daxa_clear_value[1], daxa_clear_value[2], daxa_clear_value[3]}}};
+                    }
+                    else if constexpr (std::is_same_v<T, std::array<u32, 4>>)
+                    {
+                        clear_value = {.color = {.uint32 = {daxa_clear_value[0], daxa_clear_value[1], daxa_clear_value[2], daxa_clear_value[3]}}};
+                    }
+                    else if constexpr (std::is_same_v<T, DepthValue>)
+                    {
+                        clear_value = {.depthStencil = {.depth = daxa_clear_value.depth, .stencil = daxa_clear_value.stencil}};
+                    }
+                },
+                in.clear_value);
+
             out = VkRenderingAttachmentInfo{
                 .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
                 .pNext = nullptr,
@@ -493,7 +558,7 @@ namespace daxa
                 .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
                 .loadOp = static_cast<VkAttachmentLoadOp>(in.load_op),
                 .storeOp = static_cast<VkAttachmentStoreOp>(in.store_op),
-                .clearValue = *reinterpret_cast<VkClearValue const *>(&in.clear_value),
+                .clearValue = clear_value,
             };
         };
 
@@ -662,6 +727,7 @@ namespace daxa
     void CommandList::write_timestamp(WriteTimestampInfo const & info)
     {
         auto & impl = *as<ImplCommandList>();
+        DAXA_DBG_ASSERT_TRUE_M(impl.recording_complete == false, "can only record to uncompleted command list");
         DAXA_DBG_ASSERT_TRUE_M(info.query_index < info.query_pool.info().query_count, "query_index is out of bounds for the query pool");
         impl.flush_barriers();
         vkCmdWriteTimestamp(impl.vk_cmd_buffer, static_cast<VkPipelineStageFlagBits>(info.pipeline_stage.data), info.query_pool.as<ImplTimelineQueryPool>()->vk_timeline_query_pool, info.query_index);
@@ -670,9 +736,36 @@ namespace daxa
     void CommandList::reset_timestamps(ResetTimestampsInfo const & info)
     {
         auto & impl = *as<ImplCommandList>();
+        DAXA_DBG_ASSERT_TRUE_M(impl.recording_complete == false, "can only record to uncompleted command list");
         DAXA_DBG_ASSERT_TRUE_M(info.start_index < info.query_pool.info().query_count, "reset index is out of bounds for the query pool");
         impl.flush_barriers();
         vkCmdResetQueryPool(impl.vk_cmd_buffer, info.query_pool.as<ImplTimelineQueryPool>()->vk_timeline_query_pool, info.start_index, info.count);
+    }
+
+    void CommandList::begin_label(CommandLabelInfo const & info)
+    {
+        auto & impl = *as<ImplCommandList>();
+        DAXA_DBG_ASSERT_TRUE_M(impl.recording_complete == false, "can only record to uncompleted command list");
+        impl.flush_barriers();
+        VkDebugUtilsLabelEXT const vk_debug_label_info{
+            .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT,
+            .pNext = {},
+            .pLabelName = info.label_name.c_str(),
+            .color = {
+                info.label_color[0],
+                info.label_color[1],
+                info.label_color[2],
+                info.label_color[3]},
+        };
+        impl.impl_device.as<ImplDevice>()->vkCmdBeginDebugUtilsLabelEXT(impl.vk_cmd_buffer, &vk_debug_label_info);
+    }
+
+    void CommandList::end_label()
+    {
+        auto & impl = *as<ImplCommandList>();
+        DAXA_DBG_ASSERT_TRUE_M(impl.recording_complete == false, "can only record to uncompleted command list");
+        impl.flush_barriers();
+        impl.impl_device.as<ImplDevice>()->vkCmdEndDebugUtilsLabelEXT(impl.vk_cmd_buffer);
     }
 
     auto CommandBufferPoolPool::get(ImplDevice * device) -> std::pair<VkCommandPool, VkCommandBuffer>
@@ -747,6 +840,50 @@ namespace daxa
         }
     }
 
+    void ImplCommandList::flush_constant_buffer_bindings(VkPipelineBindPoint bind_point, VkPipelineLayout pipeline_layout)
+    {
+        auto & device = *this->impl_device.as<ImplDevice>();
+        std::array<VkDescriptorBufferInfo, CONSTANT_BUFFER_BINDINGS_COUNT> descriptor_buffer_info = {};
+        std::array<VkWriteDescriptorSet, CONSTANT_BUFFER_BINDINGS_COUNT> descriptor_writes = {};
+        for (u32 index = 0; index < CONSTANT_BUFFER_BINDINGS_COUNT; ++index)
+        {
+            if (this->current_constant_buffer_bindings[index].buffer.is_empty())
+            {
+                descriptor_buffer_info[index] = VkDescriptorBufferInfo{
+                    .buffer = VK_NULL_HANDLE,
+                    .offset = {},
+                    .range = VK_WHOLE_SIZE,
+                };
+            }
+            else
+            {
+                descriptor_buffer_info[index] = VkDescriptorBufferInfo{
+                    .buffer = device.slot(current_constant_buffer_bindings[index].buffer).vk_buffer,
+                    .offset = current_constant_buffer_bindings[index].offset,
+                    .range = current_constant_buffer_bindings[index].size,
+                };
+            }
+            descriptor_writes[index] = VkWriteDescriptorSet{
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .pNext = {},
+                .dstSet = {}, // Not needed for push descriptors.
+                .dstBinding = index,
+                .dstArrayElement = 0,
+                .descriptorCount = 1,
+                .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                .pImageInfo = {},
+                .pBufferInfo = &descriptor_buffer_info[index],
+                .pTexelBufferView = {},
+            };
+        }
+
+        device.vkCmdPushDescriptorSetKHR(this->vk_cmd_buffer, bind_point, pipeline_layout, CONSTANT_BUFFER_BINDING_SET, static_cast<u32>(descriptor_writes.size()), descriptor_writes.data());
+        for (u32 index = 0; index < CONSTANT_BUFFER_BINDINGS_COUNT; ++index)
+        {
+            this->current_constant_buffer_bindings.at(index) = {};
+        }
+    }
+
     ImplCommandList::ImplCommandList(ManagedWeakPtr device_impl, VkCommandPool pool, VkCommandBuffer buffer, CommandListInfo a_info)
         : impl_device{std::move(device_impl)},
           info{std::move(a_info)},
@@ -768,9 +905,9 @@ namespace daxa
 
         vkBeginCommandBuffer(this->vk_cmd_buffer, &vk_command_buffer_begin_info);
 
-        if (this->impl_device.as<ImplDevice>()->impl_ctx.as<ImplContext>()->enable_debug_names && !this->info.debug_name.empty())
+        if (this->impl_device.as<ImplDevice>()->impl_ctx.as<ImplContext>()->enable_debug_names && this->info.name.empty())
         {
-            auto cmd_buffer_name = this->info.debug_name + std::string(" [Daxa CommandBuffer]");
+            auto cmd_buffer_name = this->info.name;
             VkDebugUtilsObjectNameInfoEXT const cmd_buffer_name_info{
                 .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
                 .pNext = nullptr,
@@ -780,7 +917,7 @@ namespace daxa
             };
             this->impl_device.as<ImplDevice>()->vkSetDebugUtilsObjectNameEXT(this->impl_device.as<ImplDevice>()->vk_device, &cmd_buffer_name_info);
 
-            auto cmd_pool_name = this->info.debug_name + std::string(" [Daxa CommandPool]");
+            auto cmd_pool_name = this->info.name;
             VkDebugUtilsObjectNameInfoEXT const cmd_pool_name_info{
                 .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
                 .pNext = nullptr,

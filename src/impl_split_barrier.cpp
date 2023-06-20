@@ -6,6 +6,23 @@
 
 namespace daxa
 {
+    auto to_string(MemoryBarrierInfo const & info) -> std::string
+    {
+        return std::format("access: ({}) -> ({})", to_string(info.src_access), to_string(info.dst_access));
+    }
+
+    auto to_string(ImageBarrierInfo const & info) -> std::string
+    {
+        return std::format("access: ({}) -> ({}), layout: ({}) -> ({}), slice: {}, id: {}", 
+        to_string(info.src_access), 
+        to_string(info.dst_access),
+        to_string(info.src_layout),
+        to_string(info.dst_layout),
+        to_string(info.image_slice),
+        to_string(info.image_id)
+        );
+    }
+
     SplitBarrierState::SplitBarrierState(SplitBarrierState && other) noexcept
         : device{other.device}, create_info{other.create_info}, data{other.data}
     {
@@ -64,9 +81,9 @@ namespace daxa
         vkCreateEvent(impl_device->vk_device, &vk_event_create_info, nullptr, &event);
         this->data = reinterpret_cast<u64>(event);
 
-        if (impl_device->impl_ctx.as<ImplContext>()->enable_debug_names && !this->create_info.debug_name.empty())
+        if (impl_device->impl_ctx.as<ImplContext>()->enable_debug_names && !this->create_info.name.empty())
         {
-            auto name = this->create_info.debug_name + std::string(" [Daxa Split Barrier]");
+            auto name = this->create_info.name;
             VkDebugUtilsObjectNameInfoEXT const name_info{
                 .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
                 .pNext = nullptr,

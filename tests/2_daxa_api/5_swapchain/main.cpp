@@ -14,15 +14,15 @@ namespace tests
                 .enable_validation = true,
             });
             daxa::Device device = daxa_ctx.create_device({
-                .debug_name = APPNAME_PREFIX("device (simple_creation)"),
+                .name = APPNAME_PREFIX("device (simple_creation)"),
             });
 
             daxa::Swapchain swapchain = device.create_swapchain({
                 .native_window = get_native_handle(),
                 .native_window_platform = get_native_platform(),
-                .present_mode = daxa::PresentMode::DOUBLE_BUFFER_WAIT_FOR_VBLANK,
+                .present_mode = daxa::PresentMode::FIFO,
                 .image_usage = daxa::ImageUsageFlagBits::TRANSFER_DST,
-                .debug_name = APPNAME_PREFIX("swapchain (simple_creation)"),
+                .name = APPNAME_PREFIX("swapchain (simple_creation)"),
             });
 
             App() : AppWindow<App>(APPNAME " (simple_creation)") {}
@@ -43,14 +43,14 @@ namespace tests
                 .enable_validation = true,
             });
             daxa::Device device = daxa_ctx.create_device({
-                .debug_name = APPNAME_PREFIX("device (clearcolor)"),
+                .name = APPNAME_PREFIX("device (clearcolor)"),
             });
 
             daxa::Swapchain swapchain = device.create_swapchain({
                 .native_window = get_native_handle(),
                 .native_window_platform = get_native_platform(),
                 .image_usage = daxa::ImageUsageFlagBits::TRANSFER_DST,
-                .debug_name = APPNAME_PREFIX("swapchain (clearcolor)"),
+                .name = APPNAME_PREFIX("swapchain (clearcolor)"),
             });
 
             App() : AppWindow<App>(APPNAME " (clearcolor)") {}
@@ -84,13 +84,13 @@ namespace tests
                     return;
                 }
                 auto cmd_list = device.create_command_list({
-                    .debug_name = APPNAME_PREFIX("cmd_list (clearcolor)"),
+                    .name = APPNAME_PREFIX("cmd_list (clearcolor)"),
                 });
 
                 cmd_list.pipeline_barrier_image_transition({
-                    .waiting_pipeline_access = daxa::AccessConsts::TRANSFER_WRITE,
-                    .before_layout = daxa::ImageLayout::UNDEFINED,
-                    .after_layout = daxa::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    .dst_access = daxa::AccessConsts::TRANSFER_WRITE,
+                    .src_layout = daxa::ImageLayout::UNDEFINED,
+                    .dst_layout = daxa::ImageLayout::TRANSFER_DST_OPTIMAL,
                     .image_id = swapchain_image,
                 });
 
@@ -101,9 +101,9 @@ namespace tests
                 });
 
                 cmd_list.pipeline_barrier_image_transition({
-                    .awaited_pipeline_access = daxa::AccessConsts::TRANSFER_WRITE,
-                    .before_layout = daxa::ImageLayout::TRANSFER_DST_OPTIMAL,
-                    .after_layout = daxa::ImageLayout::PRESENT_SRC,
+                    .src_access = daxa::AccessConsts::TRANSFER_WRITE,
+                    .src_layout = daxa::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    .dst_layout = daxa::ImageLayout::PRESENT_SRC,
                     .image_id = swapchain_image,
                 });
 

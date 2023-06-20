@@ -60,10 +60,6 @@ namespace daxa
 
         VkPhysicalDevice physical_device = *best_physical_device;
 
-        // VkPhysicalDeviceProperties vk_device_properties;
-        // vkGetPhysicalDeviceProperties(physical_device, &vk_device_properties);
-        // auto device_vulkan_info = *reinterpret_cast<DeviceProperties *>(&vk_device_properties);
-
         return Device{ManagedPtr{new ImplDevice(device_info, this->make_weak(), physical_device)}};
     }
 
@@ -72,6 +68,7 @@ namespace daxa
     {
         std::vector<char const *> enabled_layers{};
         std::vector<char const *> extension_names{};
+        this->info.enable_validation = false;
         {
             if (this->info.enable_validation)
             {
@@ -103,7 +100,7 @@ namespace daxa
                             break;
                         }
                     }
-                    DAXA_DBG_ASSERT_TRUE_M(found, "Cannot find layer: TODO(grundlett)");
+                    DAXA_DBG_ASSERT_TRUE_M(found, std::string{"Cannot find layer"} + required_layer_name);
                 }
                 return true;
             };
