@@ -227,6 +227,7 @@ set_target_properties(daxa::daxa PROPERTIES
 
 find_package(unofficial-vulkan-memory-allocator CONFIG REQUIRED)
 find_package(Vulkan REQUIRED)
+find_package(fmt CONFIG REQUIRED)
 ]=])
 
 if(DAXA_ENABLE_UTILS_FSR2)

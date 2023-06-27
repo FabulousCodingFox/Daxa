@@ -1,9 +1,7 @@
 #pragma once
 
 #include "impl_task_list.hpp"
-#include <format>
 #include <fmt/format.h>
-
 namespace daxa
 {
     enum struct Level
