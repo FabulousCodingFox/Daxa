@@ -190,6 +190,13 @@ namespace daxa
         Swapchain swapchain;
     };
 
+    struct AccelerationStructureBuildSizesInfo 
+    {
+        u64 acceleration_structure_size = {};
+        u64 update_scratch_size = {};
+        u64 build_scratch_size = {};
+    };
+
     struct Device : ManagedPtr
     {
         Device() = default;
@@ -233,6 +240,8 @@ namespace daxa
         auto create_timeline_semaphore(TimelineSemaphoreInfo const & info) -> TimelineSemaphore;
         auto create_split_barrier(SplitBarrierInfo const & info) -> SplitBarrierState;
 
+        auto get_acceleration_structure_build_sizes() -> AccelerationStructureBuildSizesInfo;
+
         auto info() const -> DeviceInfo const &;
         auto properties() const -> DeviceProperties const &;
         void wait_idle();
@@ -246,6 +255,7 @@ namespace daxa
         auto is_id_valid(BufferId id) const -> bool;
         auto is_id_valid(SamplerId id) const -> bool;
         auto is_id_valid(AccelerationStructureId id) const -> bool;
+        
 
       private:
         friend struct Context;

@@ -1035,31 +1035,30 @@ namespace daxa
         TOP_LEVEL = 0,
         BOTTOM_LEVEL = 1,
         GENERIC = 2,
+        MAX_ENUM = 0x7fffffff,
     };
-
-    using HostOrDeviceAddress = std::variant<void *, BufferDeviceAddress>;
 
     struct AccelerationStructureTriangleDataInfo
     {
         Format vertex_format = {};
-        HostOrDeviceAddress vertex_data = {};
+        BufferDeviceAddress vertex_data = {};
         u32 vertex_stride = {};
         u32 max_vertex = {};
-        HostOrDeviceAddress index_data = {};
+        BufferDeviceAddress index_data = {};
         usize index_type_byte_size = {};
-        HostOrDeviceAddress transform_data = {};
+        BufferDeviceAddress transform_data = {};
     };
 
     struct AccelerationStructureAabbDataInfo
     {
-        HostOrDeviceAddress data = {};
+        BufferDeviceAddress data = {};
         u32 stride = {};
     };
 
     struct AccelerationStructureInstanceDataInfo
     {
         bool array_of_pointers = {};
-        HostOrDeviceAddress data = {};
+        BufferDeviceAddress data = {};
     };
 
     using AccelerationStructureDataInfo = std::variant<AccelerationStructureTriangleDataInfo, AccelerationStructureAabbDataInfo, AccelerationStructureInstanceDataInfo>;

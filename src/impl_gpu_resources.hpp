@@ -52,7 +52,8 @@ namespace daxa
     {
         AccelerationStructureInfo info = {};
         VkAccelerationStructureKHR vk_acceleration_structure = {};
-        BufferId buffer_id = {};
+        VkBuffer vk_buffer = {};
+        VmaAllocation vma_allocation = {};
         bool zombie = {};
     };
 

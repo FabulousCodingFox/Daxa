@@ -3,12 +3,9 @@ using namespace daxa::types;
 
 #include <iostream>
 
-#define APPNAME "Daxa API Sample Raytrace"
-#define APPNAME_PREFIX(x) ("[" APPNAME "] " x)
-
 namespace tests
 {
-    auto simplest(daxa::Device & device) -> i32
+    auto create_accel_structure(daxa::Device & device) -> i32
     {
         using namespace daxa::types;
         struct Aabb
@@ -24,7 +21,7 @@ namespace tests
                 .stride = sizeof(Aabb),
             },
             .max_primitives = 1,
-            .name = APPNAME_PREFIX("simplest tlas"),
+            .name = "simplest tlas",
         });
         auto vertices = std::array{
             f32vec3{1.0f, 0.0f, 0.0f},
@@ -44,12 +41,18 @@ namespace tests
                 .transform_data = {}, // none
             },
             .max_primitives = 1,
-            .name = APPNAME_PREFIX("simplest blas"),
+            .name = "simplest blas",
         });
         device.wait_idle();
         device.destroy_acceleration_structure(tlas_id);
         device.destroy_acceleration_structure(blas_id);
         return 0;
+    }
+
+    auto create_rt_pipeline(daxa::Device & device) -> i32
+    {
+        using namespace daxa::types;
+
     }
 } // namespace tests
 
@@ -60,12 +63,17 @@ auto main() -> int
     });
     daxa::Device device = daxa_ctx.create_device({
         .enable_raytracing_api = true,
-        .name = APPNAME_PREFIX("device"),
+        .name = "test device",
     });
 
     i32 ret = 0;
 
-    if ((ret = tests::simplest(device)))
+    if ((ret = tests::create_accel_structure(device)))
+    {
+        return ret;
+    }
+
+    if ((ret = tests::create_rt_pipeline(device)))
     {
         return ret;
     }

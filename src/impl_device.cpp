@@ -713,7 +713,7 @@ namespace daxa
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
             .pNext = REQUIRED_DEVICE_FEATURE_P_CHAIN,
             .accelerationStructure = VK_TRUE,
-            .accelerationStructureCaptureReplay = VK_FALSE,
+            .accelerationStructureCaptureReplay = VK_TRUE,
             .accelerationStructureIndirectBuild = VK_FALSE,
             .accelerationStructureHostCommands = VK_FALSE,
             .descriptorBindingAccelerationStructureUpdateAfterBind = VK_TRUE,
@@ -728,7 +728,7 @@ namespace daxa
             .rayTracingPipeline = VK_TRUE,
             .rayTracingPipelineShaderGroupHandleCaptureReplay = VK_FALSE,
             .rayTracingPipelineShaderGroupHandleCaptureReplayMixed = VK_FALSE,
-            .rayTracingPipelineTraceRaysIndirect = VK_FALSE,
+            .rayTracingPipelineTraceRaysIndirect = VK_TRUE,
             .rayTraversalPrimitiveCulling = VK_FALSE,
         };
         if (this->info.enable_raytracing_api)
@@ -1700,169 +1700,48 @@ namespace daxa
     auto ImplDevice::new_acceleration_structure(AccelerationStructureInfo const & acceleration_structure_info) -> AccelerationStructureId
     {
         auto [id, ret] = gpu_shader_resource_table.acceleration_structure_slots.new_slot();
-        auto accel_struct_geom_triangles = VkAccelerationStructureGeometryTrianglesDataKHR{
-            .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
+        DAXA_DBG_ASSERT_TRUE_M(acceleration_structure_info.buffer_size != 0, "acceleration structure buffer size must be non zero.");
+        VkBufferCreateInfo const vk_buffer_create_info{
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
             .pNext = nullptr,
-            .vertexFormat = {},
-            .vertexData = {},
-            .vertexStride = {},
-            .maxVertex = {},
-            .indexType = {},
-            .indexData = {},
-            .transformData = {},
+            .flags = {},
+            .size = static_cast<VkDeviceSize>(acceleration_structure_info.buffer_size) + 4 /* Workaround for gpuav bugs related to bda oob access. */, // TODO: Remove this 'workaround'. It's fixed in the newest SDK
+            .usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                    VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                    VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                    VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                    VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR,
+            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+            .queueFamilyIndexCount = 1,
+            .pQueueFamilyIndices = &this->main_queue_family_index,
         };
-
-        auto accel_struct_geom_aabbs = VkAccelerationStructureGeometryAabbsDataKHR{
-            .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR,
-            .pNext = nullptr,
-            .data = {},
-            .stride = {},
+        VmaAllocationCreateFlags vma_allocation_flags = {};
+        VmaAllocationCreateInfo const vma_allocation_create_info{
+            .flags = vma_allocation_flags,
+            .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
+            .requiredFlags = {},
+            .preferredFlags = {},
+            .memoryTypeBits = std::numeric_limits<u32>::max(),
+            .pool = nullptr,
+            .pUserData = nullptr,
+            .priority = 0.5f,
         };
-
-        auto accel_struct_geom_instances = VkAccelerationStructureGeometryInstancesDataKHR{
-            .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR,
-            .pNext = nullptr,
-            .arrayOfPointers = {},
-            .data = {},
-        };
-
-        auto accel_struct_geom = VkAccelerationStructureGeometryKHR{
-            .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
-            .pNext = nullptr,
-            .geometryType = {},
-            .geometry = {},
-            .flags = VK_GEOMETRY_OPAQUE_BIT_KHR,
-        };
-
-        if (std::holds_alternative<AccelerationStructureTriangleDataInfo>(acceleration_structure_info.data_info))
-        {
-            accel_struct_geom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-            accel_struct_geom.geometry = {.triangles = accel_struct_geom_triangles};
-            auto const & triangle_info = std::get<AccelerationStructureTriangleDataInfo>(acceleration_structure_info.data_info);
-            accel_struct_geom_triangles.vertexFormat = static_cast<VkFormat>(triangle_info.vertex_format);
-            if (std::holds_alternative<void *>(triangle_info.vertex_data))
-            {
-                accel_struct_geom_triangles.vertexData.hostAddress = std::get<void *>(triangle_info.vertex_data);
-            }
-            else
-            {
-                accel_struct_geom_triangles.vertexData.deviceAddress = std::get<BufferDeviceAddress>(triangle_info.vertex_data);
-            }
-            accel_struct_geom_triangles.vertexStride = triangle_info.vertex_stride;
-            accel_struct_geom_triangles.maxVertex = triangle_info.max_vertex;
-            accel_struct_geom_triangles.indexType = triangle_info.index_type_byte_size == 0 ? VK_INDEX_TYPE_NONE_KHR : (triangle_info.index_type_byte_size == 2 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
-            if (std::holds_alternative<void *>(triangle_info.index_data))
-            {
-                accel_struct_geom_triangles.indexData.hostAddress = std::get<void *>(triangle_info.index_data);
-            }
-            else
-            {
-                accel_struct_geom_triangles.indexData.deviceAddress = std::get<BufferDeviceAddress>(triangle_info.index_data);
-            }
-            if (std::holds_alternative<void *>(triangle_info.transform_data))
-            {
-                accel_struct_geom_triangles.transformData.hostAddress = std::get<void *>(triangle_info.transform_data);
-            }
-            else
-            {
-                accel_struct_geom_triangles.transformData.deviceAddress = std::get<BufferDeviceAddress>(triangle_info.transform_data);
-            }
-        }
-        else if (std::holds_alternative<AccelerationStructureAabbDataInfo>(acceleration_structure_info.data_info))
-        {
-            accel_struct_geom.geometryType = VK_GEOMETRY_TYPE_AABBS_KHR;
-            accel_struct_geom.geometry = {.aabbs = accel_struct_geom_aabbs};
-            auto const & aabb_info = std::get<AccelerationStructureAabbDataInfo>(acceleration_structure_info.data_info);
-            if (std::holds_alternative<void *>(aabb_info.data))
-            {
-                accel_struct_geom_aabbs.data.hostAddress = std::get<void *>(aabb_info.data);
-            }
-            else
-            {
-                accel_struct_geom_aabbs.data.deviceAddress = std::get<BufferDeviceAddress>(aabb_info.data);
-            }
-            accel_struct_geom_aabbs.stride = aabb_info.stride;
-        }
-        else if (std::holds_alternative<AccelerationStructureInstanceDataInfo>(acceleration_structure_info.data_info))
-        {
-            accel_struct_geom.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
-            accel_struct_geom.geometry = {.instances = accel_struct_geom_instances};
-            auto const & instance_info = std::get<AccelerationStructureInstanceDataInfo>(acceleration_structure_info.data_info);
-            accel_struct_geom_instances.arrayOfPointers = instance_info.array_of_pointers;
-            if (std::holds_alternative<void *>(instance_info.data))
-            {
-                accel_struct_geom_instances.data.hostAddress = std::get<void *>(instance_info.data);
-            }
-            else
-            {
-                accel_struct_geom_instances.data.deviceAddress = std::get<BufferDeviceAddress>(instance_info.data);
-            }
-        }
-
-        auto accel_struct_build_geometry_info = VkAccelerationStructureBuildGeometryInfoKHR{
-            .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
-            .type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
-            .flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
-            .geometryCount = 1,
-            .pGeometries = &accel_struct_geom,
-        };
-
-        auto acceleration_structure_build_sizes_info = VkAccelerationStructureBuildSizesInfoKHR{
-            .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR,
-            .pNext = nullptr,
-            .accelerationStructureSize = {},
-            .updateScratchSize = {},
-            .buildScratchSize = {},
-        };
-
-        this->vkGetAccelerationStructureBuildSizesKHR(
-            this->vk_device,
-            VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
-            &accel_struct_build_geometry_info,
-            &acceleration_structure_info.max_primitives,
-            &acceleration_structure_build_sizes_info);
-
-        // TODO: Manually create buffer?
-        ret.buffer_id = new_buffer({
-            .size = static_cast<u32>(acceleration_structure_build_sizes_info.accelerationStructureSize),
-            .name = "temp",
-        });
-        ImplBufferSlot & buffer_slot = this->gpu_shader_resource_table.buffer_slots.dereference_id(ret.buffer_id);
-
-        auto vk_acceleration_structure_create_info = VkAccelerationStructureCreateInfoKHR{
+        VmaAllocationInfo vma_allocation_info = {};
+        [[maybe_unused]] VkResult const vk_create_buffer_result = vmaCreateBuffer(this->vma_allocator, &vk_buffer_create_info, &vma_allocation_create_info, &ret.vk_buffer, &ret.vma_allocation, &vma_allocation_info);
+        DAXA_DBG_ASSERT_TRUE_M(vk_create_buffer_result == VK_SUCCESS, "failed to create buffer to back acceleration structure");
+        VkAccelerationStructureCreateInfoKHR vk_acceleration_structure_create_info{
             .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
             .pNext = nullptr,
-            .createFlags = {},
-            .buffer = buffer_slot.vk_buffer,
+            .createFlags = {},          // TODO
+            .buffer = ret.vk_buffer,
             .offset = {},
-            .size = acceleration_structure_build_sizes_info.accelerationStructureSize,
-            .type = static_cast<VkAccelerationStructureTypeKHR>(acceleration_structure_info.type),
+            .size = ret.info.buffer_size,
+            .type = static_cast<VkAccelerationStructureTypeKHR>(ret.info.type),
             .deviceAddress = {},
         };
-        this->vkCreateAccelerationStructureKHR(this->vk_device, &vk_acceleration_structure_create_info, nullptr, &ret.vk_acceleration_structure);
-
-        if (this->impl_ctx.as<ImplContext>()->enable_debug_names && !acceleration_structure_info.name.empty())
-        {
-            auto const buffer_name = acceleration_structure_info.name + std::string(" [Daxa Buffer]");
-            VkDebugUtilsObjectNameInfoEXT const buffer_name_info{
-                .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
-                .pNext = nullptr,
-                .objectType = VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR,
-                .objectHandle = reinterpret_cast<uint64_t>(ret.vk_acceleration_structure),
-                .pObjectName = buffer_name.c_str(),
-            };
-            this->vkSetDebugUtilsObjectNameEXT(vk_device, &buffer_name_info);
-        }
-
+        [[maybe_unused]] auto result = vkCreateAccelerationStructureKHR(this->vk_device, &vk_acceleration_structure_create_info, nullptr, &ret.vk_acceleration_structure);
+        DAXA_DBG_ASSERT_TRUE_M(result == VK_SUCCESS, "failed to create acceleration structure");
         write_descriptor_set_acceleration_structure(this->vk_device, this->gpu_shader_resource_table.vk_descriptor_set, ret.vk_acceleration_structure, id.index);
-
-        // ?
-        // auto accel_struct_build_range_info = VkAccelerationStructureBuildRangeInfoKHR{
-        //     .primitiveCount = {},
-        //     .primitiveOffset = {},
-        //     .firstVertex = {},
-        //     .transformOffset = {},
-        // };
         return AccelerationStructureId{id};
     }
 
