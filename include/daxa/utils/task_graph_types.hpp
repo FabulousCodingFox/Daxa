@@ -3,8 +3,8 @@
 // Disable msvc warning on alignment padding.
 #pragma warning(disable : 4324)
 
-#if !DAXA_BUILT_WITH_UTILS_TASK_LIST
-#error "[package management error] You must build Daxa with the DAXA_ENABLE_UTILS_TASK_LIST CMake option enabled, or request the utils-task-list feature in vcpkg"
+#if !DAXA_BUILT_WITH_UTILS_TASK_GRAPH
+#error "[package management error] You must build Daxa with the DAXA_ENABLE_UTILS_TASK_GRAPH CMake option enabled, or request the utils-task-graph feature in vcpkg"
 #endif
 
 #include <span>
@@ -112,7 +112,7 @@ namespace daxa
 
     struct TaskGPUResourceHandle
     {
-        TaskResourceIndex task_list_index = {};
+        TaskResourceIndex task_graph_index = {};
         TaskResourceIndex index = {};
 
         auto is_empty() const -> bool;
@@ -167,7 +167,7 @@ namespace daxa
     struct alignas(TASK_INPUT_FIELD_SIZE) TaskBufferUse
     {
       private:
-        friend struct ImplTaskList;
+        friend struct ImplTaskGraph;
         TaskResourceUseType const type = TaskResourceUseType::BUFFER;
         std::span<BufferId const> buffers = {};
         TaskBufferAccess m_access = T_ACCESS;
@@ -226,7 +226,7 @@ namespace daxa
     struct alignas(TASK_INPUT_FIELD_SIZE) TaskImageUse
     {
       private:
-        friend struct ImplTaskList;
+        friend struct ImplTaskGraph;
         TaskResourceUseType type = TaskResourceUseType::IMAGE;
         TaskImageAccess m_access = T_ACCESS;
         ImageViewType m_view_type = T_VIEW_TYPE;
@@ -385,7 +385,7 @@ namespace daxa
         using T_USES = decltype(T_TASK{}.uses);
         static constexpr usize USE_COUNT = sizeof(T_USES) / TASK_INPUT_FIELD_SIZE;
 
-        PredeclaredTask(T_TASK const & task) : task{task} {}
+        PredeclaredTask(T_TASK const & a_task) : task{a_task} {}
 
         virtual ~PredeclaredTask() override = default;
 
@@ -411,7 +411,7 @@ namespace daxa
             }
         }
 
-        virtual auto get_name() const -> std::string
+        virtual auto get_name() const -> std::string override
         {
             if constexpr (requires { task.name; })
             {

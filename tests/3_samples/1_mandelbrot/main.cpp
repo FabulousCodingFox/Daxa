@@ -67,7 +67,7 @@ struct App : BaseApp<App>
         .name = "timeline_query",
     });
 
-    daxa::TaskList loop_task_list = record_loop_task_list();
+    daxa::TaskGraph loop_task_graph = record_loop_task_graph();
 
     ~App()
     {
@@ -95,10 +95,10 @@ struct App : BaseApp<App>
         gpu_input.delta_time = delta_time;
 
         auto reloaded_result = pipeline_manager.reload_all();
-        if (reloaded_result.has_value())
-        {
-            std::cout << reloaded_result.value().to_string() << std::endl;
-        }
+        if (auto reload_err = std::get_if<daxa::PipelineReloadError>(&reloaded_result))
+            std::cout << "Failed to reload " << reload_err->message << '\n';
+        if (auto _ = std::get_if<daxa::PipelineReloadSuccess>(&reloaded_result))
+            std::cout << "Successfully reloaded!\n";
 
         ui_update();
 
@@ -108,7 +108,7 @@ struct App : BaseApp<App>
         {
             return;
         }
-        loop_task_list.execute({});
+        loop_task_graph.execute({});
 
         auto query_results = timeline_query_pool.get_query_results(0, 2);
         if ((query_results[1] != 0u) && (query_results[3] != 0u))
@@ -139,14 +139,14 @@ struct App : BaseApp<App>
         }
     }
 
-    void record_tasks(daxa::TaskList & new_task_list)
+    void record_tasks(daxa::TaskGraph & new_task_graph)
     {
         using namespace daxa::task_resource_uses;
 
-        new_task_list.use_persistent_image(task_render_image);
-        new_task_list.use_persistent_buffer(task_gpu_input_buffer);
+        new_task_graph.use_persistent_image(task_render_image);
+        new_task_graph.use_persistent_buffer(task_gpu_input_buffer);
 
-        new_task_list.add_task({
+        new_task_graph.add_task({
             .uses = {
                 BufferHostTransferWrite{task_gpu_input_buffer},
             },
@@ -179,7 +179,7 @@ struct App : BaseApp<App>
             },
             .name = APPNAME_PREFIX("Upload Input"),
         });
-        new_task_list.add_task({
+        new_task_graph.add_task({
             .uses = {
                 BufferComputeShaderRead{task_gpu_input_buffer},
                 ImageComputeShaderWrite<>{task_render_image},
@@ -201,7 +201,7 @@ struct App : BaseApp<App>
             },
             .name = APPNAME_PREFIX("Draw (Compute)"),
         });
-        new_task_list.add_task({
+        new_task_graph.add_task({
             .uses = {
                 ImageTransferRead<>{task_render_image},
                 ImageTransferWrite<>{task_swapchain_image},

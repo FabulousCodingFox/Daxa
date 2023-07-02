@@ -27,7 +27,7 @@ struct App : BaseApp<App>
     });
     daxa::TaskImage task_render_image{{.initial_images = {.images = std::array{render_image}}, .name = "task_render_image"}};
 
-    daxa::TaskList loop_task_list = record_loop_task_list();
+    daxa::TaskGraph loop_task_graph = record_loop_task_graph();
 
     ~App()
     {
@@ -45,10 +45,10 @@ struct App : BaseApp<App>
     void on_update()
     {
         auto reloaded_result = pipeline_manager.reload_all();
-        if (reloaded_result.has_value())
-        {
-            std::cout << reloaded_result.value().to_string() << std::endl;
-        }
+        if (auto reload_err = std::get_if<daxa::PipelineReloadError>(&reloaded_result))
+            std::cout << "Failed to reload " << reload_err->message << '\n';
+        if (auto _ = std::get_if<daxa::PipelineReloadSuccess>(&reloaded_result))
+            std::cout << "Successfully reloaded!\n";
         ui_update();
 
         auto swapchain_image = swapchain.acquire_next_image();
@@ -57,7 +57,7 @@ struct App : BaseApp<App>
         {
             return;
         }
-        loop_task_list.execute({});
+        loop_task_graph.execute({});
     }
 
     void on_mouse_move(f32 /*unused*/, f32 /*unused*/) {}
@@ -82,12 +82,12 @@ struct App : BaseApp<App>
         }
     }
 
-    void record_tasks(daxa::TaskList & new_task_list)
+    void record_tasks(daxa::TaskGraph & new_task_graph)
     {
         using namespace daxa::task_resource_uses;
-        new_task_list.use_persistent_image(task_render_image);
+        new_task_graph.use_persistent_image(task_render_image);
 
-        new_task_list.add_task({
+        new_task_graph.add_task({
             .uses = {
                 ImageComputeShaderWrite<>{task_render_image},
             },
@@ -103,7 +103,7 @@ struct App : BaseApp<App>
             },
             .name = APPNAME_PREFIX("Draw (Compute)"),
         });
-        new_task_list.add_task({
+        new_task_graph.add_task({
             .uses = {
                 ImageTransferRead<>{task_render_image},
                 ImageTransferWrite<>{task_swapchain_image},
